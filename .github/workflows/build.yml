@@ -41,7 +41,6 @@ jobs:
           requirements: hydrus\requirements.txt
       - name: build with pyinstaller
         run: |
-          dir /s
           pyinstaller --windowed --noupx --specpath="specs" --name="server" "hydrus\server.py"
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2.1.4
