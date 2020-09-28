@@ -12,7 +12,9 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
+        with:
+          path: hydrus
       - 
         name: Setup Python
         uses: actions/setup-python@v2
@@ -33,5 +35,5 @@ jobs:
         uses: JackMcKew/pyinstaller-action-windows@v0.1.2
         with:
           # Directory containing source code (optional requirements.txt).
-          path: ./
-          spec: docker/pyinstaller/client.spec
+          path: hydrus
+          spec: /hydrus/docker/pyinstaller/client-win.spec
