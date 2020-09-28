@@ -38,7 +38,7 @@ jobs:
         uses: BSFishy/pip-action@v1
         with:
           packages: pyinstaller
-          requirements: requirements.txt
+          requirements: hydrus\requirements.txt
       - name: build with pyinstaller
         run: |
           pyinstaller hydrus\docker\pyinstaller\client-win.spec
