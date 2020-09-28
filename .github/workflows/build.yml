@@ -13,73 +13,26 @@ jobs:
       -
         name: Checkout
         uses: actions/checkout@v1
-      -
-        name: Set up Docker Buildx
-        id: buildx
-        uses: crazy-max/ghaction-docker-buildx@v1
+      - 
+        name: Setup Python
+        uses: actions/setup-python@v2
         with:
-          version: latest
-      -
-        name: Available platforms
-        run: echo ${{ steps.buildx.outputs.platforms }}
+          python-version: 3.7
+          architecture: x64
       - 
-        name: Docker login
-        run: |
-          docker login -u "${DOCKER_REGISTRY_USERNAME}" -p "${DOCKER_REGISTRY_PASSWORD}"
-        env:
-          DOCKER_REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          DOCKER_REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-      -
-        name: Run Buildx
-        run: |
-          docker buildx build \
-            --platform linux/amd64,linux/arm64,linux/ppc64le,linux/s390x,linux/386,linux/arm/v7,linux/arm/v6 \
-            --cache-from suika/hydrus:latest \
-            --output "type=image,push=true" \
-            --tag suika/hydrus:latest \
-            --tag suika/hydrus:v$(grep SOFTWARE_VERSION hydrus/core/HydrusConstants.py | cut -d " " -f 3) \
-            --file ./docker/client/Dockerfile .
-      - 
-        name: Docker logout
-        run: |
-          docker logout
-        env:
-          DOCKER_REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-  build-server:
-    runs-on: [ubuntu-latest]
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v1
-      -
-        name: Set up Docker Buildx
-        id: buildx
-        uses: crazy-max/ghaction-docker-buildx@v1
+        name: Install Qt
+        uses: jurplel/install-qt-action@v2.8.0
         with:
-          version: latest
-      -
-        name: Available platforms
-        run: echo ${{ steps.buildx.outputs.platforms }}
-      - 
-        name: Docker login
-        run: |
-          docker login -u "${DOCKER_REGISTRY_USERNAME}" -p "${DOCKER_REGISTRY_PASSWORD}"
-        env:
-          DOCKER_REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          DOCKER_REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-      -
-        name: Run Buildx
-        run: |
-          docker buildx build \
-            --platform linux/amd64,linux/arm64,linux/ppc64le,linux/s390x,linux/386,linux/arm/v7,linux/arm/v6 \
-            --cache-from suika/hydrus:server \
-            --output "type=image,push=true" \
-            --tag suika/hydrus:server \
-            --tag suika/hydrus:server-v$(grep SOFTWARE_VERSION hydrus/core/HydrusConstants.py | cut -d " " -f 3) \
-            --file ./docker/server/Dockerfile .
-      - 
-        name: Docker logout
-        run: |
-          docker logout
-        env:
-          DOCKER_REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          version: 5.15
+          install-deps: true
+          modules: qtcharts qtwidgets qtgui qtcore
+#      - name: Pip Installer
+#        uses: BSFishy/pip-action@v1
+#        with:
+#          requirements: requirements.txt
+      - name: PyInstaller Windows
+        uses: JackMcKew/pyinstaller-action-windows@v0.1.2
+        with:
+          # Directory containing source code (optional requirements.txt).
+          path: ./
+          spec: docker/pyinstaller/client.spec
