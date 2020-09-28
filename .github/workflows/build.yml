@@ -21,19 +21,23 @@ jobs:
         with:
           python-version: 3.7
           architecture: x64
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v1
+        with:
+          key: ${{ runner.os }}-QtCache
       - 
         name: Install Qt
         uses: jurplel/install-qt-action@v2.8.0
         with:
           install-deps: true
           modules: qtcharts qtwidgets qtgui qtcore
-#      - name: Pip Installer
-#        uses: BSFishy/pip-action@v1
-#        with:
-#          requirements: requirements.txt
-      - name: PyInstaller Windows
-        uses: JackMcKew/pyinstaller-action-windows@v0.1.2
+          cached: ${{ steps.cache-qt.outputs.cache-hit }}
+      - name: Pip Installer
+        uses: BSFishy/pip-action@v1
         with:
-          # Directory containing source code (optional requirements.txt).
-          path: hydrus
-          spec: hydrus\docker\pyinstaller\client-win.spec
+          packages: pyinstaller
+          requirements: requirements.txt
+      - name: build with pyinstaller
+        run: |
+          pyinstaller hydrus\docker\pyinstaller\client-win.spec
