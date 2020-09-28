@@ -36,4 +36,4 @@ jobs:
         with:
           # Directory containing source code (optional requirements.txt).
           path: hydrus
-          spec: /hydrus/docker/pyinstaller/client-win.spec
+          spec: hydrus\docker\pyinstaller\client-win.spec
