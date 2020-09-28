@@ -41,4 +41,5 @@ jobs:
           requirements: hydrus\requirements.txt
       - name: build with pyinstaller
         run: |
-          pyinstaller hydrus\docker\pyinstaller\client-win.spec
+          move hydrus\docker\pyinstaller\client-win.spec client-win.spec
+          pyinstaller client-win.spec
