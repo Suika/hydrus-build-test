@@ -44,6 +44,7 @@ jobs:
           move hydrus\docker\pyinstaller\client-win.spec client-win.spec
           move hydrus\docker\pyinstaller\server-win.spec server-win.spec
           pyinstaller server-win.spec
+          dir -r
           pyinstaller client-win.spec
 #      - name: Upload a Build Artifact
 #        uses: actions/upload-artifact@v2.1.4
