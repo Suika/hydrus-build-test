@@ -45,12 +45,11 @@ jobs:
           cp hydrus/docker/pyinstaller/server.spec server.spec
           pyinstaller server.spec
           pyinstaller client.spec
-          dir -r
-#      - name: Upload a Build Artifact
-#        uses: actions/upload-artifact@v2.1.4
-#        with:
-#          name: specdata
-#          path: dist\client
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2.1.4
+        with:
+          name: specdata
+          path: dist/client
 
 #  build-client:
 #    runs-on: [windows-latest]
