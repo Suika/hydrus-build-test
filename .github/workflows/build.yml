@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-client:
-    runs-on: [windows-latest]
+    runs-on: [macos-latest]
     steps:
       -
         name: Checkout
@@ -38,16 +38,61 @@ jobs:
         uses: BSFishy/pip-action@v1
         with:
           packages: pyinstaller
-          requirements: hydrus\requirements.txt
+          requirements: hydrus/requirements.txt
       - name: build with pyinstaller
         run: |
-          move hydrus\docker\pyinstaller\client-win.spec client-win.spec
-          move hydrus\docker\pyinstaller\server-win.spec server-win.spec
-          pyinstaller server-win.spec
-          pyinstaller client-win.spec
+          cp hydrus/docker/pyinstaller/client.spec client.spec
+          cp hydrus/docker/pyinstaller/server.spec server.spec
+          pyinstaller server.spec
+          pyinstaller client.spec
           dir -r
-      - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2.1.4
-        with:
-          name: specdata
-          path: dist\client
+#      - name: Upload a Build Artifact
+#        uses: actions/upload-artifact@v2.1.4
+#        with:
+#          name: specdata
+#          path: dist\client
+
+#  build-client:
+#    runs-on: [windows-latest]
+#    steps:
+#      -
+#        name: Checkout
+#        uses: actions/checkout@v2
+#        with:
+#          path: hydrus
+#      - 
+#        name: Setup Python
+#        uses: actions/setup-python@v2
+#        with:
+#          python-version: 3.7
+#          architecture: x64
+#      - name: Cache Qt
+#        id: cache-qt
+#        uses: actions/cache@v1
+#        with:
+#          path: Qt
+#          key: ${{ runner.os }}-QtCache
+#      - 
+#        name: Install Qt
+#        uses: jurplel/install-qt-action@v2.8.0
+#        with:
+#          install-deps: true
+#          modules: qtcharts qtwidgets qtgui qtcore
+#          cached: ${{ steps.cache-qt.outputs.cache-hit }}
+#      - name: Pip Installer
+#        uses: BSFishy/pip-action@v1
+#        with:
+#          packages: pyinstaller
+#          requirements: hydrus\requirements.txt
+#      - name: build with pyinstaller
+#        run: |
+#          move hydrus\docker\pyinstaller\client-win.spec client-win.spec
+#          move hydrus\docker\pyinstaller\server-win.spec server-win.spec
+#          pyinstaller server-win.spec
+#          pyinstaller client-win.spec
+#          dir -r
+#      - name: Upload a Build Artifact
+#        uses: actions/upload-artifact@v2.1.4
+#        with:
+#          name: specdata
+#          path: dist\client
