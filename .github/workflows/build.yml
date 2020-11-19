@@ -29,7 +29,7 @@ jobs:
           key: ${{ runner.os }}-QtCache
       - 
         name: Install Qt
-        uses: jurplel/install-qt-action@v2.8.0
+        uses: jurplel/install-qt-action@v2.10.0
         with:
           install-deps: true
           modules: qtcharts qtwidgets qtgui qtcore
@@ -73,7 +73,7 @@ jobs:
 #          key: ${{ runner.os }}-QtCache
 #      - 
 #        name: Install Qt
-#        uses: jurplel/install-qt-action@v2.8.0
+#        uses: jurplel/install-qt-action@v2.10.0
 #        with:
 #          install-deps: true
 #          modules: qtcharts qtwidgets qtgui qtcore
