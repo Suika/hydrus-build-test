@@ -7,7 +7,7 @@ on:
     branches: master
 
 jobs:
-    build-client-sur:
+  build-client-sur:
     runs-on: [macos-11.0]
     steps:
       -
