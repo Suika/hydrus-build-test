@@ -58,7 +58,7 @@ jobs:
           pyinstaller server.spec
           pyinstaller client.spec
       - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2.1.4
+        uses: actions/upload-artifact@v2.2.1
         with:
           name: specdata-sur
           path: dist/client
@@ -101,7 +101,7 @@ jobs:
 #          pyinstaller server.spec
 #          pyinstaller client.spec
 #      - name: Upload a Build Artifact
-#        uses: actions/upload-artifact@v2.1.4
+#        uses: actions/upload-artifact@v2.2.1
 #        with:
 #          name: specdata
 #          path: dist/client
@@ -146,7 +146,7 @@ jobs:
 #          pyinstaller client-win.spec
 #          dir -r
 #      - name: Upload a Build Artifact
-#        uses: actions/upload-artifact@v2.1.4
+#        uses: actions/upload-artifact@v2.2.1
 #        with:
 #          name: specdata
 #          path: dist\client
