@@ -34,24 +34,7 @@ jobs:
           conda config --show-sources
           conda config --show
           printenv | sort
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v1
-        with:
-          path: Qt
-          key: ${{ runner.os }}-QtCache
-      - 
-        name: Install Qt
-        uses: jurplel/install-qt-action@v2.10.0
-        with:
-          install-deps: true
-          modules: qtcharts qtwidgets qtgui qtcore
-          cached: ${{ steps.cache-qt.outputs.cache-hit }}
-      - name: Pip Installer
-        uses: BSFishy/pip-action@v1
-        with:
-          packages: pyinstaller
-          requirements: hydrus/requirements.txt
+          conda install --yes --file hydrus/requirements.txt
       - name: build with pyinstaller
         run: |
           cp hydrus/docker/pyinstaller/client.spec client.spec
