@@ -14,7 +14,6 @@ from hydrus.core import HydrusPaths
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientExporting
 from hydrus.client import ClientSearch
-from hydrus.client.gui import ClientGUIACDropdown
 from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -25,6 +24,7 @@ from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.metadata import ClientTags
+from hydrus.client.gui.search import ClientGUIACDropdown
 
 class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
     
@@ -449,7 +449,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._neighbouring_txt_tag_service_keys = services_manager.FilterValidServiceKeys( new_options.GetKeyList( 'default_neighbouring_txt_tag_service_keys' ) )
         
-        t = ClientGUIListBoxes.ListBoxTagsMedia( self._tags_box, ClientTags.TAG_DISPLAY_SIBLINGS_AND_PARENTS, include_counts = True )
+        t = ClientGUIListBoxes.ListBoxTagsMedia( self._tags_box, ClientTags.TAG_DISPLAY_ACTUAL, include_counts = True )
         
         self._tags_box.SetTagsBox( t )
         
@@ -740,7 +740,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                         
                         for service_key in neighbouring_txt_tag_service_keys:
                             
-                            current_tags = tags_manager.GetCurrent( service_key, ClientTags.TAG_DISPLAY_SIBLINGS_AND_PARENTS )
+                            current_tags = tags_manager.GetCurrent( service_key, ClientTags.TAG_DISPLAY_ACTUAL )
                             
                             tags.update( current_tags )
                             

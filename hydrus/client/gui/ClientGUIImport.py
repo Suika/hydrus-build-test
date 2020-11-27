@@ -16,7 +16,6 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
-from hydrus.client.gui import ClientGUIACDropdown
 from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIControls
 from hydrus.client.gui import ClientGUICore as CGC
@@ -35,6 +34,7 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.search import ClientGUIACDropdown
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportLocal
 from hydrus.client.importing import ClientImportOptions
@@ -205,9 +205,6 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
         
         tags = HydrusTags.CleanTags( tags )
         
-        parents_manager = HG.client_controller.tag_parents_manager
-        
-        tags = parents_manager.ExpandTags( self._service_key, tags )
         tags = HG.client_controller.tag_display_manager.FilterTags( ClientTags.TAG_DISPLAY_STORAGE, self._service_key, tags )
         
         return tags
@@ -707,21 +704,9 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             
             HG.client_controller.Write( 'push_recent_tags', self._service_key, tags )
             
-            tag_parents_manager = HG.client_controller.tag_parents_manager
-            
-            parents = set()
-            
-            for tag in tags:
-                
-                some_parents = tag_parents_manager.GetParents( self._service_key, tag )
-                
-                parents.update( some_parents )
-                
-            
             if len( tags ) > 0:
                 
                 self._tags.AddTags( tags )
-                self._tags.AddTags( parents )
                 
                 self._refresh_callable()
                 
@@ -731,28 +716,15 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             
             HG.client_controller.Write( 'push_recent_tags', self._service_key, tags )
             
-            tag_parents_manager = HG.client_controller.tag_parents_manager
-            
-            parents = set()
-            
-            for tag in tags:
-                
-                some_parents = tag_parents_manager.GetParents( self._service_key, tag )
-                
-                parents.update( some_parents )
-                
-            
             if len( tags ) > 0:
                 
                 self._single_tags.AddTags( tags )
-                self._single_tags.AddTags( parents )
                 
                 for path in self._selected_paths:
                     
                     current_tags = self._paths_to_single_tags[ path ]
                     
                     current_tags.update( tags )
-                    current_tags.update( parents )
                     
                 
                 self._refresh_callable()
@@ -1492,7 +1464,7 @@ class EditLocalImportFilenameTaggingPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def GetValue( self ):
         
-        paths_to_service_keys_to_tags = collections.defaultdict( ClientTags.ServiceKeysToTags )
+        paths_to_additional_service_keys_to_tags = collections.defaultdict( ClientTags.ServiceKeysToTags )
         
         for page in self._tag_repositories.GetPages():
             
@@ -1505,11 +1477,11 @@ class EditLocalImportFilenameTaggingPanel( ClientGUIScrolledPanels.EditPanel ):
                     continue
                     
                 
-                paths_to_service_keys_to_tags[ path ][ service_key ] = tags
+                paths_to_additional_service_keys_to_tags[ path ][ service_key ] = tags
                 
             
         
-        return paths_to_service_keys_to_tags
+        return paths_to_additional_service_keys_to_tags
         
     
     class _Panel( QW.QWidget ):

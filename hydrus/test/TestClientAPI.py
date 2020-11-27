@@ -50,6 +50,21 @@ class TestClientAPI( unittest.TestCase ):
         time.sleep( 1 )
         
     
+    def _compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates ):
+        
+        self.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
+        
+        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            
+            expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
+            
+            c_u_tuples = sorted( ( c_u.ToTuple() for c_u in content_updates ) )
+            e_c_u_tuples = sorted( ( e_c_u.ToTuple() for e_c_u in expected_content_updates ) )
+            
+            self.assertEqual( c_u_tuples, e_c_u_tuples )
+            
+        
+    
     def _test_basics( self, connection ):
         
         #
@@ -449,7 +464,7 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response.getheader( 'Access-Control-Allow-Origin' ), '*' )
         
     
-    def _test_add_files( self, connection, set_up_permissions ):
+    def _test_add_files_add_file( self, connection, set_up_permissions ):
         
         api_permissions = set_up_permissions[ 'add_files' ]
         
@@ -537,6 +552,212 @@ class TestClientAPI( unittest.TestCase ):
         expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : 'ad6d3599a6c489a575eb19c026face97a9cd6579e74728b0ce94a601d232f3c3' , 'note' : 'test note' }
         
         self.assertEqual( response_json, expected_result )
+        
+    
+    def _test_add_files_other_actions( self, connection, set_up_permissions ):
+        
+        api_permissions = set_up_permissions[ 'add_files' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        #
+        
+        hash = HydrusData.GenerateKey()
+        hashes = { HydrusData.GenerateKey() for i in range( 10 ) }
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/delete_files'
+        
+        body_dict = { 'hash' : hash.hex() }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash } ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/delete_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ] }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/undelete_files'
+        
+        body_dict = { 'hash' : hash.hex() }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.TRASH_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, { hash } ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/undelete_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ] }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.TRASH_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/archive_files'
+        
+        body_dict = { 'hash' : hash.hex() }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, { hash } ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/archive_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ] }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, hashes ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/unarchive_files'
+        
+        body_dict = { 'hash' : hash.hex() }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, { hash } ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/unarchive_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ] }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, hashes ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
     
     def _test_add_tags( self, connection, set_up_permissions ):
@@ -668,17 +889,7 @@ class TestClientAPI( unittest.TestCase ):
         
         [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
-        
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
-            
-            expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
-            
-            c_u_tuples = sorted( ( c_u.ToTuple() for c_u in content_updates ) )
-            e_c_u_tuples = sorted( ( e_c_u.ToTuple() for e_c_u in expected_content_updates ) )
-            
-            self.assertEqual( c_u_tuples, e_c_u_tuples )
-            
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
         # add to multiple files
         
@@ -704,119 +915,7 @@ class TestClientAPI( unittest.TestCase ):
         
         [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
-        
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
-            
-            expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
-            
-            c_u_tuples = sorted( ( c_u.ToTuple() for c_u in content_updates ) )
-            e_c_u_tuples = sorted( ( e_c_u.ToTuple() for e_c_u in expected_content_updates ) )
-            
-            self.assertEqual( c_u_tuples, e_c_u_tuples )
-            
-        
-        # siblings and parents
-        
-        # going to nuke this, so won't do anything soon
-        
-        # setting up
-        
-        old_par = HG.test_controller.tag_parents_manager
-        
-        first_dict = HydrusData.default_dict_set()
-        
-        first_dict[ HC.CONTENT_STATUS_CURRENT ] = [ ( 'test', 'muh test' ) ]
-        
-        HG.test_controller.SetRead( 'tag_siblings', first_dict )
-        
-        tag_parents = collections.defaultdict( HydrusData.default_dict_set )
-        
-        first_dict = HydrusData.default_dict_set()
-        
-        first_dict[ HC.CONTENT_STATUS_CURRENT ] = { ( 'muh test', 'muh test parent' ) }
-        
-        tag_parents[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = first_dict
-        
-        HG.test_controller.SetRead( 'tag_parents', tag_parents )
-        
-        HG.test_controller.tag_parents_manager = ClientManagers.TagParentsManager( HG.test_controller )
-        
-        # ok, now with
-        
-        HG.test_controller.ClearWrites( 'content_updates' )
-        
-        path = '/add_tags/add_tags'
-        
-        body_dict = { 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'muh test' ] } }
-        
-        body = json.dumps( body_dict )
-        
-        connection.request( 'POST', path, body = body, headers = headers )
-        
-        response = connection.getresponse()
-        
-        data = response.read()
-        
-        self.assertEqual( response.status, 200 )
-        
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
-        
-        expected_service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'muh test', set( [ hash ] ) ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'muh test parent', set( [ hash ] ) ) ) ]
-        
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
-        
-        self.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
-        
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
-            
-            expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
-            
-            c_u_tuples = sorted( ( c_u.ToTuple() for c_u in content_updates ) )
-            e_c_u_tuples = sorted( ( e_c_u.ToTuple() for e_c_u in expected_content_updates ) )
-            
-            self.assertEqual( c_u_tuples, e_c_u_tuples )
-            
-        
-        # and without
-        
-        HG.test_controller.ClearWrites( 'content_updates' )
-        
-        path = '/add_tags/add_tags'
-        
-        body_dict = { 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'muh test' ] }, 'add_siblings_and_parents' : False }
-        
-        body = json.dumps( body_dict )
-        
-        connection.request( 'POST', path, body = body, headers = headers )
-        
-        response = connection.getresponse()
-        
-        data = response.read()
-        
-        self.assertEqual( response.status, 200 )
-        
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
-        
-        expected_service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'muh test', set( [ hash ] ) ) ) ]
-        
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
-        
-        self.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
-        
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
-            
-            expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
-            
-            c_u_tuples = sorted( ( c_u.ToTuple() for c_u in content_updates ) )
-            e_c_u_tuples = sorted( ( e_c_u.ToTuple() for e_c_u in expected_content_updates ) )
-            
-            self.assertEqual( c_u_tuples, e_c_u_tuples )
-            
-        
-        # cleanup
-        
-        HG.test_controller.tag_parents_manager = old_par
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
     
     def _test_add_urls( self, connection, set_up_permissions ):
@@ -1013,7 +1112,7 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
         self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, None, None, False ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, set(), ClientTags.ServiceKeysToTags(), None, None, False ), {} ) ] )
         
         # with name
         
@@ -1038,7 +1137,7 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
         self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, 'muh /tv/', None, False ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, set(), ClientTags.ServiceKeysToTags(), 'muh /tv/', None, False ), {} ) ] )
         
         # with page_key
         
@@ -1066,13 +1165,13 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
         self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, None, page_key, False ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, set(), ClientTags.ServiceKeysToTags(), None, page_key, False ), {} ) ] )
         
         # add tags and name, and show destination page
         
         HG.test_controller.ClearWrites( 'import_url_test' )
         
-        request_dict = { 'url' : url, 'destination_page_name' : 'muh /tv/', 'show_destination_page' : True, 'service_names_to_tags' : { 'my tags' : [ '/tv/ thread' ] } }
+        request_dict = { 'url' : url, 'destination_page_name' : 'muh /tv/', 'show_destination_page' : True, 'filterable_tags' : [ 'filename:yo' ], 'service_names_to_additional_tags' : { 'my tags' : [ '/tv/ thread' ] } }
         
         request_body = json.dumps( request_dict )
         
@@ -1091,9 +1190,10 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
         self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
         
-        service_keys_to_tags = ClientTags.ServiceKeysToTags( { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : set( [ '/tv/ thread' ] ) } )
+        filterable_tags = [ 'filename:yo' ]
+        additional_service_keys_to_tags = ClientTags.ServiceKeysToTags( { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : set( [ '/tv/ thread' ] ) } )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, service_keys_to_tags, 'muh /tv/', None, True ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, set( filterable_tags ), additional_service_keys_to_tags, 'muh /tv/', None, True ), {} ) ] )
         
         # associate url
         
@@ -1581,8 +1681,8 @@ class TestClientAPI( unittest.TestCase ):
             
             file_info_manager = ClientMediaManagers.FileInfoManager( file_id, hash, size = size, mime = mime, width = width, height = height, duration = duration, has_audio = has_audio )
             
-            service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
-            service_keys_to_statuses_to_display_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
+            service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue_eyes', 'blonde_hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
+            service_keys_to_statuses_to_display_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit', 'clothing' ] } }
             
             tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
             
@@ -1646,6 +1746,24 @@ class TestClientAPI( unittest.TestCase ):
                 
             
             metadata_row[ 'service_names_to_statuses_to_tags' ] = service_names_to_statuses_to_tags
+            
+            service_names_to_statuses_to_tags = {}
+            
+            service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_ACTUAL )
+            
+            for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
+                
+                if service_key not in service_keys_to_names:
+                    
+                    service_keys_to_names[ service_key ] = services_manager.GetName( service_key )
+                    
+                
+                service_name = service_keys_to_names[ service_key ]
+                
+                service_names_to_statuses_to_tags[ service_name ] = { str( status ) : list( tags ) for ( status, tags ) in statuses_to_tags.items() }
+                
+            
+            metadata_row[ 'service_names_to_statuses_to_display_tags' ] = service_names_to_statuses_to_tags
             
             metadata.append( metadata_row )
             
@@ -1803,8 +1921,8 @@ class TestClientAPI( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( file_id, hash, size = size, mime = mime, width = width, height = height, duration = duration )
         
-        service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
-        service_keys_to_statuses_to_display_tags =  { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
+        service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue_eyes', 'blonde_hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
+        service_keys_to_statuses_to_display_tags =  { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit', 'clothing' ] } }
         
         tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
         
@@ -2007,7 +2125,8 @@ class TestClientAPI( unittest.TestCase ):
         
         self._test_basics( connection )
         set_up_permissions = self._test_client_api_basics( connection )
-        self._test_add_files( connection, set_up_permissions )
+        self._test_add_files_add_file( connection, set_up_permissions )
+        self._test_add_files_other_actions( connection, set_up_permissions )
         self._test_add_tags( connection, set_up_permissions )
         self._test_add_urls( connection, set_up_permissions )
         self._test_manage_cookies( connection, set_up_permissions )

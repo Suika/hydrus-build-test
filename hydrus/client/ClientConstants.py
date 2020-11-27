@@ -42,6 +42,18 @@ DISCRIMINANT_ARCHIVE = 3
 DISCRIMINANT_DOWNLOADING = 4
 DISCRIMINANT_LOCAL_BUT_NOT_IN_TRASH = 5
 
+DIRECTION_UP = 0
+DIRECTION_LEFT = 1
+DIRECTION_RIGHT = 2
+DIRECTION_DOWN = 3
+
+directions_alignment_string_lookup = {}
+
+directions_alignment_string_lookup[ DIRECTION_UP ] = 'top'
+directions_alignment_string_lookup[ DIRECTION_LEFT ] = 'left'
+directions_alignment_string_lookup[ DIRECTION_RIGHT ] = 'right'
+directions_alignment_string_lookup[ DIRECTION_DOWN ] = 'bottom'
+
 DUMPER_NOT_DUMPED = 0
 DUMPER_DUMPED_OK = 1
 DUMPER_RECOVERABLE_ERROR = 2
@@ -290,6 +302,7 @@ SORT_FILES_BY_HAS_AUDIO = 13
 SORT_FILES_BY_FILE_MODIFIED_TIMESTAMP = 14
 SORT_FILES_BY_FRAMERATE = 15
 SORT_FILES_BY_NUM_FRAMES = 16
+SORT_FILES_BY_NUM_COLLECTION_FILES = 17
 
 SYSTEM_SORT_TYPES = []
 
@@ -299,6 +312,7 @@ SYSTEM_SORT_TYPES.append( SORT_FILES_BY_RATIO )
 SYSTEM_SORT_TYPES.append( SORT_FILES_BY_NUM_PIXELS )
 SYSTEM_SORT_TYPES.append( SORT_FILES_BY_DURATION )
 SYSTEM_SORT_TYPES.append( SORT_FILES_BY_FRAMERATE )
+SYSTEM_SORT_TYPES.append( SORT_FILES_BY_NUM_COLLECTION_FILES )
 SYSTEM_SORT_TYPES.append( SORT_FILES_BY_NUM_FRAMES )
 SYSTEM_SORT_TYPES.append( SORT_FILES_BY_FILESIZE )
 SYSTEM_SORT_TYPES.append( SORT_FILES_BY_IMPORT_TIME )
@@ -313,6 +327,7 @@ SYSTEM_SORT_TYPES.append( SORT_FILES_BY_MEDIA_VIEWTIME )
 
 system_sort_type_submetatype_string_lookup = {}
 
+system_sort_type_submetatype_string_lookup[ SORT_FILES_BY_NUM_COLLECTION_FILES ] = 'collections'
 system_sort_type_submetatype_string_lookup[ SORT_FILES_BY_HEIGHT ] = 'dimensions'
 system_sort_type_submetatype_string_lookup[ SORT_FILES_BY_NUM_PIXELS ] = 'dimensions'
 system_sort_type_submetatype_string_lookup[ SORT_FILES_BY_RATIO ] = 'dimensions'
@@ -337,6 +352,7 @@ sort_type_basic_string_lookup[ SORT_FILES_BY_DURATION ] = 'duration'
 sort_type_basic_string_lookup[ SORT_FILES_BY_FRAMERATE ] = 'framerate'
 sort_type_basic_string_lookup[ SORT_FILES_BY_NUM_FRAMES ] = 'number of frames'
 sort_type_basic_string_lookup[ SORT_FILES_BY_HEIGHT ] = 'height'
+sort_type_basic_string_lookup[ SORT_FILES_BY_NUM_COLLECTION_FILES ] = 'number of files in collection'
 sort_type_basic_string_lookup[ SORT_FILES_BY_NUM_PIXELS ] = 'number of pixels'
 sort_type_basic_string_lookup[ SORT_FILES_BY_RATIO ] = 'resolution ratio'
 sort_type_basic_string_lookup[ SORT_FILES_BY_WIDTH ] = 'width'

@@ -32,7 +32,15 @@ class HydrusException( Exception ):
 class CantRenderWithCVException( HydrusException ): pass
 class DataMissing( HydrusException ): pass
 
-class DBException( HydrusException ): pass
+class DBException( HydrusException ):
+    
+    def __init__( self, e, first_line, db_traceback ):
+        
+        self.db_e = e
+        
+        HydrusException.__init__( self, first_line, db_traceback )
+        
+    
 class DBAccessException( HydrusException ): pass
 class DBCredentialsException( HydrusException ): pass
 class FileMissingException( HydrusException ): pass
@@ -65,6 +73,7 @@ class NetworkException( HydrusException ): pass
 class NetworkInfrastructureException( NetworkException ): pass
 class ConnectionException( NetworkInfrastructureException ): pass
 class FirewallException( NetworkInfrastructureException ): pass
+class RouterException( NetworkInfrastructureException ): pass
 class CloudFlareException( NetworkInfrastructureException ): pass
 class BandwidthException( NetworkInfrastructureException ): pass
 class ServerException( NetworkInfrastructureException ): pass

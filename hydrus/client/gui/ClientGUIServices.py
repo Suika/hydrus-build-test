@@ -415,7 +415,7 @@ class ManageAccountTypesPanel( ClientGUIScrolledPanels.ManagePanel ):
             keys = set( self._deletee_account_type_keys_to_new_account_type_keys.keys() )
             values = set( self._deletee_account_type_keys_to_new_account_type_keys.values() )
             
-            return len( keys.intersection( values ) ) > 0
+            return HydrusData.SetsIntersect( keys, values )
             
         
         while key_transfer_not_collapsed():
@@ -921,13 +921,13 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                     
                     url = scheme + host + ':' + str( port ) + '/' + request
                     
-                    if self._service_type in HC.REPOSITORIES:
+                    if self._service_type == HC.IPFS:
                         
-                        network_job = ClientNetworkingJobs.NetworkJobHydrus( CC.TEST_SERVICE_KEY, 'GET', url )
+                        network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
                         
                     else:
                         
-                        network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
+                        network_job = ClientNetworkingJobs.NetworkJobHydrus( CC.TEST_SERVICE_KEY, 'GET', url )
                         
                     
                     network_job.OnlyTryConnectionOnce()

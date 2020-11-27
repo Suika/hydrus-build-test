@@ -766,12 +766,14 @@ class HydrusResourceClientAPIRestrictedAccountVerify( HydrusResourceClientAPIRes
         return response_context
         
     
-class HydrusResourceClientAPIRestrictedAddFile( HydrusResourceClientAPIRestricted ):
+class HydrusResourceClientAPIRestrictedAddFiles( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request ):
         
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_FILES )
         
+    
+class HydrusResourceClientAPIRestrictedAddFilesAddFile( HydrusResourceClientAPIRestrictedAddFiles ):
     
     def _threadDoPOSTJob( self, request ):
         
@@ -821,6 +823,146 @@ class HydrusResourceClientAPIRestrictedAddFile( HydrusResourceClientAPIRestricte
         return response_context
         
     
+class HydrusResourceClientAPIRestrictedAddFilesArchiveFiles( HydrusResourceClientAPIRestrictedAddFiles ):
+    
+    def _threadDoPOSTJob( self, request ):
+        
+        hashes = set()
+        
+        if 'hash' in request.parsed_request_args:
+            
+            hash = request.parsed_request_args.GetValue( 'hash', bytes )
+            
+            hashes.add( hash )
+            
+        
+        if 'hashes' in request.parsed_request_args:
+            
+            more_hashes = request.parsed_request_args.GetValue( 'hashes', list )
+            
+            hashes.update( more_hashes )
+            
+        
+        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, hashes )
+        
+        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+        
+        if len( service_keys_to_content_updates ) > 0:
+            
+            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+class HydrusResourceClientAPIRestrictedAddFilesDeleteFiles( HydrusResourceClientAPIRestrictedAddFiles ):
+    
+    def _threadDoPOSTJob( self, request ):
+        
+        hashes = set()
+        
+        if 'hash' in request.parsed_request_args:
+            
+            hash = request.parsed_request_args.GetValue( 'hash', bytes )
+            
+            hashes.add( hash )
+            
+        
+        if 'hashes' in request.parsed_request_args:
+            
+            more_hashes = request.parsed_request_args.GetValue( 'hashes', list )
+            
+            hashes.update( more_hashes )
+            
+        
+        # expand this to take file service and reason
+        
+        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes )
+        
+        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+        
+        if len( service_keys_to_content_updates ) > 0:
+            
+            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+class HydrusResourceClientAPIRestrictedAddFilesUnarchiveFiles( HydrusResourceClientAPIRestrictedAddFiles ):
+    
+    def _threadDoPOSTJob( self, request ):
+        
+        hashes = set()
+        
+        if 'hash' in request.parsed_request_args:
+            
+            hash = request.parsed_request_args.GetValue( 'hash', bytes )
+            
+            hashes.add( hash )
+            
+        
+        if 'hashes' in request.parsed_request_args:
+            
+            more_hashes = request.parsed_request_args.GetValue( 'hashes', list )
+            
+            hashes.update( more_hashes )
+            
+        
+        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, hashes )
+        
+        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+        
+        if len( service_keys_to_content_updates ) > 0:
+            
+            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+class HydrusResourceClientAPIRestrictedAddFilesUndeleteFiles( HydrusResourceClientAPIRestrictedAddFiles ):
+    
+    def _threadDoPOSTJob( self, request ):
+        
+        hashes = set()
+        
+        if 'hash' in request.parsed_request_args:
+            
+            hash = request.parsed_request_args.GetValue( 'hash', bytes )
+            
+            hashes.add( hash )
+            
+        
+        if 'hashes' in request.parsed_request_args:
+            
+            more_hashes = request.parsed_request_args.GetValue( 'hashes', list )
+            
+            hashes.update( more_hashes )
+            
+        
+        # expand this to take file service, if and when we move to multiple trashes or whatever
+        
+        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes )
+        
+        service_keys_to_content_updates = { CC.TRASH_SERVICE_KEY : [ content_update ] }
+        
+        if len( service_keys_to_content_updates ) > 0:
+            
+            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
 class HydrusResourceClientAPIRestrictedAddTags( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request ):
@@ -854,8 +996,6 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
             
         
         #
-        
-        add_siblings_and_parents = request.parsed_request_args.GetValue( 'add_siblings_and_parents', bool, default_value = True )
         
         service_keys_to_content_updates = collections.defaultdict( list )
         
@@ -892,13 +1032,6 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
                     content_action = HC.CONTENT_UPDATE_PEND
                     
                 
-                if add_siblings_and_parents:
-                    
-                    parents_manager = HG.client_controller.tag_parents_manager
-                    
-                    tags = parents_manager.ExpandTags( service_key, tags )
-                    
-                
                 content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_action, ( tag, hashes ) ) for tag in tags ]
                 
                 service_keys_to_content_updates[ service_key ].extend( content_updates )
@@ -924,19 +1057,19 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
                 
                 for ( content_action, tags ) in actions_to_tags.items():
                     
-                    content_action = int( content_action )
-                    
                     tags = list( tags )
+                    
+                    if len( tags ) == 0:
+                        
+                        continue
+                        
                     
                     if isinstance( tags[0], str ):
                         
                         tags = HydrusTags.CleanTags( tags )
                         
                     
-                    if len( tags ) == 0:
-                        
-                        continue
-                        
+                    content_action = int( content_action )
                     
                     if service.GetServiceType() == HC.LOCAL_TAG:
                         
@@ -953,16 +1086,7 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
                             
                         
                     
-                    if content_action in ( HC.CONTENT_UPDATE_ADD, HC.CONTENT_UPDATE_PEND ) and add_siblings_and_parents:
-                        
-                        parents_manager = HG.client_controller.tag_parents_manager
-                        
-                        tags = parents_manager.ExpandTags( service_key, tags )
-                        
-                    
                     if content_action == HC.CONTENT_UPDATE_PETITION:
-                        
-                        tags = list( tags )
                         
                         if isinstance( tags[0], str ):
                             
@@ -1240,17 +1364,33 @@ class HydrusResourceClientAPIRestrictedAddURLsImportURL( HydrusResourceClientAPI
             raise HydrusExceptions.BadRequestException( 'Given URL was empty!' )
             
         
-        service_keys_to_tags = None
+        filterable_tags = set()
         
-        if 'service_names_to_tags' in request.parsed_request_args:
-            
-            service_keys_to_tags = ClientTags.ServiceKeysToTags()
+        if 'filterable_tags' in request.parsed_request_args:
             
             request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS )
             
-            service_names_to_tags = request.parsed_request_args.GetValue( 'service_names_to_tags', dict )
+            filterable_tags = request.parsed_request_args.GetValue( 'filterable_tags', list )
             
-            for ( service_name, tags ) in service_names_to_tags.items():
+            filterable_tags = HydrusTags.CleanTags( filterable_tags )
+            
+        
+        additional_service_keys_to_tags = ClientTags.ServiceKeysToTags()
+        
+        if 'service_names_to_tags' in request.parsed_request_args or 'service_names_to_additional_tags' in request.parsed_request_args:
+            
+            request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS )
+            
+            if 'service_names_to_tags' in request.parsed_request_args:
+                
+                service_names_to_additional_tags = request.parsed_request_args.GetValue( 'service_names_to_tags', dict )
+                
+            else:
+                
+                service_names_to_additional_tags = request.parsed_request_args.GetValue( 'service_names_to_additional_tags', dict )
+                
+            
+            for ( service_name, tags ) in service_names_to_additional_tags.items():
                 
                 try:
                     
@@ -1268,7 +1408,7 @@ class HydrusResourceClientAPIRestrictedAddURLsImportURL( HydrusResourceClientAPI
                     continue
                     
                 
-                service_keys_to_tags[ service_key ] = tags
+                additional_service_keys_to_tags[ service_key ] = tags
                 
             
         
@@ -1290,7 +1430,7 @@ class HydrusResourceClientAPIRestrictedAddURLsImportURL( HydrusResourceClientAPI
         
         def do_it():
             
-            return HG.client_controller.gui.ImportURLFromAPI( url, service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page )
+            return HG.client_controller.gui.ImportURLFromAPI( url, filterable_tags, additional_service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page )
             
         
         try:
@@ -1537,6 +1677,28 @@ class HydrusResourceClientAPIRestrictedGetFilesFileMetadata( HydrusResourceClien
                     
                 
                 metadata_row[ 'service_names_to_statuses_to_tags' ] = service_names_to_statuses_to_tags
+                
+                #
+                
+                service_names_to_statuses_to_tags = {}
+                
+                service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_ACTUAL )
+                
+                for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
+                    
+                    if service_key not in service_keys_to_names:
+                        
+                        service_keys_to_names[ service_key ] = services_manager.GetName( service_key )
+                        
+                    
+                    service_name = service_keys_to_names[ service_key ]
+                    
+                    service_names_to_statuses_to_tags[ service_name ] = { str( status ) : list( tags ) for ( status, tags ) in statuses_to_tags.items() }
+                    
+                
+                metadata_row[ 'service_names_to_statuses_to_display_tags' ] = service_names_to_statuses_to_tags
+                
+                #
                 
                 metadata.append( metadata_row )
                 

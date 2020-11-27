@@ -15,6 +15,7 @@ from hydrus.core import HydrusText
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientSearch
 from hydrus.client import ClientThreading
+from hydrus.client.gui import ClientGUIAsync
 from hydrus.client.gui import ClientGUICanvas
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
@@ -419,7 +420,8 @@ class Page( QW.QSplitter ):
         
         self._management_controller.SetKey( 'page', self._page_key )
         
-        self._initialised = False
+        self._initialised = len( initial_hashes ) == 0
+        self._pre_initialisation_media_results = []
         
         self._pretty_status = ''
         
@@ -534,6 +536,18 @@ class Page( QW.QSplitter ):
         clean_up_old_panel()
         
     
+    def AddMediaResults( self, media_results ):
+        
+        if self._initialised:
+            
+            self._media_panel.AddMediaResults( self._page_key, media_results )
+            
+        else:
+            
+            self._pre_initialisation_media_results.extend( media_results )
+            
+        
+    
     def CheckAbleToClose( self ):
         
         self._management_panel.CheckAbleToClose()
@@ -596,7 +610,12 @@ class Page( QW.QSplitter ):
             
         else:
             
-            return self._initial_hashes
+            hashes = list( self._initial_hashes )
+            hashes.extend( ( media_result.GetHash() for media_result in self._pre_initialisation_media_results ) )
+            
+            hashes = HydrusData.DedupeList( hashes )
+            
+            return hashes
             
         
     
@@ -727,6 +746,11 @@ class Page( QW.QSplitter ):
         return self._management_controller.IsImporter()
         
     
+    def IsInitialised( self ):
+        
+        return self._initialised
+        
+    
     def IsURLImportPage( self ):
         
         return self._management_controller.GetType() == ClientGUIManagement.MANAGEMENT_TYPE_IMPORT_URLS
@@ -780,27 +804,6 @@ class Page( QW.QSplitter ):
         self._media_panel.setFocus( QC.Qt.OtherFocusReason )
         
     
-    def SetInitialMediaResults( self, media_results ):
-        
-        if self._management_controller.IsImporter():
-            
-            file_service_key = CC.LOCAL_FILE_SERVICE_KEY
-            
-        else:
-            
-            file_service_key = self._management_controller.GetKey( 'file_service' )
-            
-        
-        media_panel = ClientGUIResults.MediaPanelThumbnails( self, self._page_key, file_service_key, media_results )
-        
-        self._SwapMediaPanel( media_panel )
-        
-        self._initialised = True
-        self._initial_hashes = []
-        
-        QP.CallAfter( self._management_panel.Start ) # importand this is callafter, so it happens after a heavy session load is done
-        
-    
     def SetName( self, name ):
         
         return self._management_controller.SetPageName( name )
@@ -849,17 +852,84 @@ class Page( QW.QSplitter ):
         self._management_panel.PausePlaySearch()
         
     
+    def _StartInitialMediaResultsLoad( self ):
+        
+        def qt_code_status( status ):
+            
+            self._SetPrettyStatus( status )
+            
+        
+        controller = self._controller
+        initial_hashes = HydrusData.DedupeList( self._initial_hashes )
+        
+        def work_callable():
+            
+            initial_media_results = []
+            
+            for group_of_initial_hashes in HydrusData.SplitListIntoChunks( initial_hashes, 256 ):
+                
+                more_media_results = controller.Read( 'media_results', group_of_initial_hashes )
+                
+                initial_media_results.extend( more_media_results )
+                
+                status = 'Loading initial files\u2026 ' + HydrusData.ConvertValueRangeToPrettyString( len( initial_media_results ), len( initial_hashes ) )
+                
+                controller.CallAfterQtSafe( self, qt_code_status, status )
+                
+                QP.CallAfter( qt_code_status, status )
+                
+            
+            hashes_to_media_results = { media_result.GetHash() : media_result for media_result in initial_media_results }
+            
+            sorted_initial_media_results = [ hashes_to_media_results[ hash ] for hash in initial_hashes if hash in hashes_to_media_results ]
+            
+            return sorted_initial_media_results
+            
+        
+        def publish_callable( media_results ):
+            
+            if self._management_controller.IsImporter():
+                
+                file_service_key = CC.LOCAL_FILE_SERVICE_KEY
+                
+            else:
+                
+                file_service_key = self._management_controller.GetKey( 'file_service' )
+                
+            
+            media_panel = ClientGUIResults.MediaPanelThumbnails( self, self._page_key, file_service_key, media_results )
+            
+            self._SwapMediaPanel( media_panel )
+            
+            if len( self._pre_initialisation_media_results ) > 0:
+                
+                media_panel.AddMediaResults( self._page_key, self._pre_initialisation_media_results )
+                
+                self._pre_initialisation_media_results = []
+                
+            
+            self._initialised = True
+            self._initial_hashes = []
+            
+            QP.CallAfter( self._management_panel.Start ) # important this is callafter, so it happens after a heavy session load is done
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
+        
+        job.start()
+        
+    
     def Start( self ):
         
         if self._initial_hashes is not None and len( self._initial_hashes ) > 0:
             
-            self._controller.CallToThread( self.THREADLoadInitialMediaResults, self._controller, self._initial_hashes )
+            self._StartInitialMediaResultsLoad()
             
         else:
             
             self._initialised = True
             
-            QP.CallAfter( self._management_panel.Start ) # importand this is callafter, so it happens after a heavy session load is done
+            QP.CallAfter( self._management_panel.Start ) # important this is callafter, so it happens after a heavy session load is done
             
         
     
@@ -889,53 +959,18 @@ class Page( QW.QSplitter ):
             
         
     
-    def THREADLoadInitialMediaResults( self, controller, initial_hashes ):
-        
-        def qt_code_status( status ):
-            
-            if not self or not QP.isValid( self ):
-                
-                return
-                
-            
-            self._SetPrettyStatus( status )
-            
-        
-        def qt_code_publish( media_results ):
-            
-            if not self or not QP.isValid( self ):
-                
-                return
-                
-            
-            self.SetInitialMediaResults( media_results )
-            
-        
-        initial_media_results = []
-        
-        for group_of_initial_hashes in HydrusData.SplitListIntoChunks( initial_hashes, 256 ):
-            
-            more_media_results = controller.Read( 'media_results', group_of_initial_hashes )
-            
-            initial_media_results.extend( more_media_results )
-            
-            status = 'Loading initial files\u2026 ' + HydrusData.ConvertValueRangeToPrettyString( len( initial_media_results ), len( initial_hashes ) )
-            
-            QP.CallAfter( qt_code_status, status )
-            
-        
-        hashes_to_media_results = { media_result.GetHash() : media_result for media_result in initial_media_results }
-        
-        sorted_initial_media_results = [ hashes_to_media_results[ hash ] for hash in initial_hashes if hash in hashes_to_media_results ]
-        
-        QP.CallAfter( qt_code_publish, sorted_initial_media_results )
-        
-    
     def REPEATINGPageUpdate( self ):
         
         self._management_panel.REPEATINGPageUpdate()
         
     
+directions_for_notebook_tabs = {}
+
+directions_for_notebook_tabs[ CC.DIRECTION_UP ] = QW.QTabWidget.North
+directions_for_notebook_tabs[ CC.DIRECTION_LEFT ] = QW.QTabWidget.West
+directions_for_notebook_tabs[ CC.DIRECTION_RIGHT ] = QW.QTabWidget.East
+directions_for_notebook_tabs[ CC.DIRECTION_DOWN ] = QW.QTabWidget.South
+
 class PagesNotebook( QP.TabWidgetWithDnD ):
     
     def __init__( self, parent, controller, name ):
@@ -944,15 +979,9 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         self._parent_notebook = parent
         
-        # this is disabled for now because it seems borked in Qt
-        if controller.new_options.GetBoolean( 'notebook_tabs_on_left' ):
-            
-            self.setTabPosition( QW.QTabWidget.West )
-            
-        else:
-            
-            self.setTabPosition( QW.QTabWidget.North )
-            
+        direction = controller.new_options.GetInteger( 'notebook_tab_alignment' )
+        
+        self.setTabPosition( directions_for_notebook_tabs[ direction ] )
         
         self._controller = controller
         
@@ -968,7 +997,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         self._controller.sub( self, 'RefreshPageName', 'refresh_page_name' )
         self._controller.sub( self, 'NotifyPageUnclosed', 'notify_page_unclosed' )
-        self._controller.sub( self, '_UpdatePageTabEliding', 'notify_new_options' )
+        self._controller.sub( self, '_UpdateOptions', 'notify_new_options' )
         
         self.currentChanged.connect( self.pageJustChanged )
         self.pageDragAndDropped.connect( self._RefreshPageNamesAfterDnD )
@@ -981,7 +1010,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         self._previous_page_index = -1
         
-        self._UpdatePageTabEliding()
+        self._UpdateOptions()
         
     
     def _RefreshPageNamesAfterDnD( self, page_widget, source_widget ):
@@ -999,7 +1028,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
         
     
-    def _UpdatePageTabEliding( self ):
+    def _UpdateOptions( self ):
         
         if HG.client_controller.new_options.GetBoolean( 'elide_page_tab_names' ):
             
@@ -1009,6 +1038,10 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
             self.tabBar().setElideMode( QC.Qt.ElideNone )
             
+        
+        direction = HG.client_controller.new_options.GetInteger( 'notebook_tab_alignment' )
+        
+        self.setTabPosition( directions_for_notebook_tabs[ direction ] )
         
     
     def _UpdatePreviousPageIndex( self ):
@@ -1274,18 +1307,23 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         return [ self.widget( i ) for i in range( self.count() ) ]
         
     
-    def _GetPageFromName( self, page_name ):
+    def _GetPageFromName( self, page_name, only_media_pages = False ):
         
         for page in self._GetPages():
             
             if page.GetName() == page_name:
                 
-                return page
+                do_not_do_it = only_media_pages and isinstance( page, PagesNotebook )
+                
+                if not do_not_do_it:
+                    
+                    return page
+                    
                 
             
             if isinstance( page, PagesNotebook ):
                 
-                result = page._GetPageFromName( page_name )
+                result = page._GetPageFromName( page_name, only_media_pages = only_media_pages )
                 
                 if result is not None:
                     
@@ -1366,9 +1404,16 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         page = self.widget( index )
         
-        page_name = page.GetName()
-        
-        page_name = page_name.replace( os.linesep, '' )
+        if isinstance( page, Page ) and not page.IsInitialised():
+            
+            page_name = 'initialising'
+            
+        else:
+            
+            page_name = page.GetName()
+            
+            page_name = page_name.replace( os.linesep, '' )
+            
         
         page_name = HydrusText.ElideText( page_name, max_page_name_chars )
         
@@ -2409,7 +2454,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
             media_results = self._controller.Read( 'media_results', hashes, sorted = True )
             
-            dest_page.GetMediaPanel().AddMediaResults( dest_page.GetPageKey(), media_results )
+            dest_page.AddMediaResults( media_results )
             
         else:
             
@@ -2423,6 +2468,73 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
             source_page.GetMediaPanel().RemoveMedia( source_page.GetPageKey(), hashes )
             
+        
+    
+    def MoveSelection( self, delta, just_do_test = False ):
+        
+        current_index = self.currentIndex()
+        current_page = self.currentWidget()
+        
+        if current_page is None or current_index is None:
+            
+            return False
+            
+        elif isinstance( current_page, PagesNotebook ):
+            
+            if current_page.MoveSelection( delta, just_do_test = True ):
+                
+                return current_page.MoveSelection( delta, just_do_test = just_do_test )
+                
+            
+        
+        new_index = self.currentIndex() + delta
+        
+        if 0 <= new_index <= self.count() - 1:
+            
+            if not just_do_test:
+                
+                self.setCurrentIndex( new_index )
+                
+            
+            return True
+            
+        
+        return False
+        
+    
+    def MoveSelectionEnd( self, delta, just_do_test = False ):
+        
+        if self.count() <= 1: # 1 is a no-op
+            
+            return False
+            
+        
+        current_index = self.currentIndex()
+        current_page = self.currentWidget()
+        
+        if isinstance( current_page, PagesNotebook ):
+            
+            if current_page.MoveSelectionEnd( delta, just_do_test = True ):
+                
+                return current_page.MoveSelectionEnd( delta, just_do_test = just_do_test )
+                
+            
+        
+        if delta < 0:
+            
+            new_index = 0
+            
+        else:
+            
+            new_index = self.count() - 1
+            
+        
+        if not just_do_test:
+            
+            self.setCurrentIndex( new_index )
+            
+        
+        return True
         
     
     def NewPage( self, management_controller, initial_hashes = None, forced_insertion_index = None, on_deepest_notebook = False, select_page = True ):
@@ -2741,7 +2853,9 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
     
     def PresentImportedFilesToPage( self, hashes, page_name ):
         
-        page = self._GetPageFromName( page_name )
+        hashes = list( hashes )
+        
+        page = self._GetPageFromName( page_name, only_media_pages = True )
         
         if page is None:
             
@@ -2749,24 +2863,21 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
         else:
             
-            def qt_finish( page, media_results ):
-                
-                if not QP.isValid( page ):
-                    
-                    return
-                    
-                
-                page.GetMediaPanel().AddMediaResults( page.GetPageKey(), media_results )
-                
-            
-            def do_it( page, hashes ):
+            def work_callable():
                 
                 media_results = self._controller.Read( 'media_results', hashes, sorted = True )
                 
-                QP.CallAfter( qt_finish, page, media_results )
+                return media_results
                 
             
-            HG.client_controller.CallToThread( do_it, page, hashes )
+            def publish_callable( media_results ):
+                
+                page.AddMediaResults( media_results )
+                
+            
+            job = ClientGUIAsync.AsyncQtJob( page, work_callable, publish_callable )
+            
+            job.start()
             
         
         return page

@@ -79,7 +79,7 @@ from hydrus.client.media import ClientMediaResult
 from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientNetworkingContexts
 
-MENU_ORDER = [ 'file', 'undo', 'pages', 'database', 'pending', 'network', 'services', 'help' ]
+MENU_ORDER = [ 'file', 'undo', 'pages', 'database', 'network', 'services', 'tags', 'pending', 'help' ]
 
 def THREADUploadPending( service_key ):
     
@@ -652,175 +652,6 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
         result = ClientGUIDialogsQuick.GetYesNo( self, text, yes_label = 'do it', no_label = 'not now' )
-        
-        if result == QW.QDialog.Accepted:
-            
-            self._controller.CallToThread( do_it )
-            
-        
-    
-    def _AutoServerSetup( self ):
-        
-        def do_it():
-            
-            host = '127.0.0.1'
-            port = HC.DEFAULT_SERVER_ADMIN_PORT
-            
-            if HydrusNetworking.LocalPortInUse( port ):
-                
-                HydrusData.ShowText( 'The server appears to be already running. Either that, or something else is using port ' + str( HC.DEFAULT_SERVER_ADMIN_PORT ) + '.' )
-                
-                return
-                
-            else:
-                
-                try:
-                    
-                    HydrusData.ShowText( 'Starting server\u2026' )
-                    
-                    db_param = '-d=' + self._controller.GetDBDir()
-                    
-                    if HC.PLATFORM_WINDOWS:
-                        
-                        server_frozen_path = os.path.join( HC.BASE_DIR, 'server.exe' )
-                        
-                    else:
-                        
-                        server_frozen_path = os.path.join( HC.BASE_DIR, 'server' )
-                        
-                    
-                    if os.path.exists( server_frozen_path ):
-                        
-                        cmd = [ server_frozen_path, db_param ]
-                        
-                    else:
-                        
-                        python_executable = sys.executable
-                        
-                        if python_executable.endswith( 'client.exe' ) or python_executable.endswith( 'client' ):
-                            
-                            raise Exception( 'Could not automatically set up the server--could not find server executable or python executable.' )
-                            
-                        
-                        if 'pythonw' in python_executable:
-                            
-                            python_executable = python_executable.replace( 'pythonw', 'python' )
-                            
-                        
-                        server_script_path = os.path.join( HC.BASE_DIR, 'server.py' )
-                        
-                        cmd = [ python_executable, server_script_path, db_param ]
-                        
-                    
-                    sbp_kwargs = HydrusData.GetSubprocessKWArgs( hide_terminal = False )
-                    
-                    HydrusData.CheckProgramIsNotShuttingDown()
-                    
-                    subprocess.Popen( cmd, **sbp_kwargs )
-                    
-                    time_waited = 0
-                    
-                    while not HydrusNetworking.LocalPortInUse( port ):
-                        
-                        time.sleep( 3 )
-                        
-                        time_waited += 3
-                        
-                        if time_waited > 30:
-                            
-                            raise Exception( 'The server\'s port did not appear!' )
-                            
-                        
-                    
-                except:
-                    
-                    HydrusData.ShowText( 'I tried to start the server, but something failed!' + os.linesep + traceback.format_exc() )
-                    
-                    return
-                    
-                
-            
-            time.sleep( 5 )
-            
-            HydrusData.ShowText( 'Creating admin service\u2026' )
-            
-            admin_service_key = HydrusData.GenerateKey()
-            service_type = HC.SERVER_ADMIN
-            name = 'local server admin'
-            
-            admin_service = ClientServices.GenerateService( admin_service_key, service_type, name )
-            
-            all_services = list( self._controller.services_manager.GetServices() )
-            
-            all_services.append( admin_service )
-            
-            self._controller.SetServices( all_services )
-            
-            time.sleep( 1 )
-            
-            admin_service = self._controller.services_manager.GetService( admin_service_key ) # let's refresh it
-            
-            credentials = HydrusNetwork.Credentials( host, port )
-            
-            admin_service.SetCredentials( credentials )
-            
-            time.sleep( 1 )
-            
-            response = admin_service.Request( HC.GET, 'access_key', { 'registration_key' : b'init' } )
-            
-            access_key = response[ 'access_key' ]
-            
-            credentials = HydrusNetwork.Credentials( host, port, access_key )
-            
-            admin_service.SetCredentials( credentials )
-            
-            #
-            
-            HydrusData.ShowText( 'Admin service initialised.' )
-            
-            QP.CallAfter( ClientGUIFrames.ShowKeys, 'access', (access_key,) )
-            
-            #
-            
-            time.sleep( 5 )
-            
-            HydrusData.ShowText( 'Creating tag and file services\u2026' )
-            
-            response = admin_service.Request( HC.GET, 'services' )
-            
-            serverside_services = response[ 'services' ]
-            
-            service_key = HydrusData.GenerateKey()
-            
-            tag_service = HydrusNetwork.GenerateService( service_key, HC.TAG_REPOSITORY, 'tag service', HC.DEFAULT_SERVICE_PORT )
-            
-            serverside_services.append( tag_service )
-            
-            service_key = HydrusData.GenerateKey()
-            
-            file_service = HydrusNetwork.GenerateService( service_key, HC.FILE_REPOSITORY, 'file service', HC.DEFAULT_SERVICE_PORT + 1 )
-            
-            serverside_services.append( file_service )
-            
-            response = admin_service.Request( HC.POST, 'services', { 'services' : serverside_services } )
-            
-            service_keys_to_access_keys = response[ 'service_keys_to_access_keys' ]
-            
-            deletee_service_keys = []
-            
-            with HG.dirty_object_lock:
-                
-                self._controller.WriteSynchronous( 'update_server_services', admin_service_key, serverside_services, service_keys_to_access_keys, deletee_service_keys )
-                
-                self._controller.RefreshServices()
-                
-            
-            HydrusData.ShowText( 'Done! Check services->review services to see your new server and its services.' )
-            
-        
-        text = 'This will attempt to start the server in the same install directory as this client, initialise it, and store the resultant admin accounts in the client.'
-        
-        result = ClientGUIDialogsQuick.GetYesNo( self, text )
         
         if result == QW.QDialog.Accepted:
             
@@ -1816,11 +1647,27 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
-    def _ImportURL( self, url, service_keys_to_tags = None, destination_page_name = None, destination_page_key = None, show_destination_page = True, allow_watchers = True, allow_other_recognised_urls = True, allow_unrecognised_urls = True ):
+    def _ImportURL(
+        self,
+        url,
+        filterable_tags = None,
+        additional_service_keys_to_tags = None,
+        destination_page_name = None,
+        destination_page_key = None,
+        show_destination_page = True,
+        allow_watchers = True,
+        allow_other_recognised_urls = True,
+        allow_unrecognised_urls = True
+        ):
         
-        if service_keys_to_tags is None:
+        if filterable_tags is None:
             
-            service_keys_to_tags = ClientTags.ServiceKeysToTags()
+            filterable_tags = set()
+            
+        
+        if additional_service_keys_to_tags is None:
+            
+            additional_service_keys_to_tags = ClientTags.ServiceKeysToTags()
             
         
         url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
@@ -1853,7 +1700,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 
                 management_panel = page.GetManagementPanel()
                 
-                management_panel.PendURL( url, service_keys_to_tags = service_keys_to_tags )
+                management_panel.PendURL( url, filterable_tags = filterable_tags, additional_service_keys_to_tags = additional_service_keys_to_tags )
                 
                 return ( url, '"{}" URL added successfully.'.format( match_name ) )
                 
@@ -1873,7 +1720,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 
                 management_panel = page.GetManagementPanel()
                 
-                management_panel.PendURL( url, service_keys_to_tags = service_keys_to_tags )
+                management_panel.PendURL( url, filterable_tags = filterable_tags, additional_service_keys_to_tags = additional_service_keys_to_tags )
                 
                 return ( url, '"{}" URL added successfully.'.format( match_name ) )
                 
@@ -2691,7 +2538,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                 else:
                     
-                    return
+                    raise HydrusExceptions.CancelledException()
                     
                 
             
@@ -2727,7 +2574,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                 else:
                     
-                    return
+                    raise HydrusExceptions.CancelledException()
                     
                 
             
@@ -2755,38 +2602,39 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         def THREAD_do_it( controller ):
             
+            job_key = ClientThreading.JobKey()
+            
+            job_key.SetVariable( 'popup_text_1', 'Waiting for current subscription work to finish.' )
+            
+            controller.pub( 'message', job_key )
+            
             with self._delayed_dialog_lock:
-                
-                original_pause_status = controller.options[ 'pause_subs_sync' ]
-                
-                controller.options[ 'pause_subs_sync' ] = True
                 
                 try:
                     
-                    if HG.client_controller.subscriptions_manager.SubscriptionsRunning():
+                    try:
                         
-                        job_key = ClientThreading.JobKey()
+                        original_pause_status = controller.options[ 'pause_subs_sync' ]
                         
-                        try:
+                        controller.options[ 'pause_subs_sync' ] = True
+                        
+                        if HG.client_controller.subscriptions_manager.SubscriptionsRunning():
                             
-                            job_key.SetVariable( 'popup_text_1', 'Waiting for subs to finish.' )
-                            
-                            controller.pub( 'message', job_key )
-                            
-                            while HG.client_controller.subscriptions_manager.SubscriptionsRunning():
-                                
-                                time.sleep( 0.1 )
-                                
-                                if HG.view_shutdown:
+                                while HG.client_controller.subscriptions_manager.SubscriptionsRunning():
                                     
-                                    return
+                                    time.sleep( 0.1 )
+                                    
+                                    if HG.view_shutdown:
+                                        
+                                        return
+                                        
                                     
                                 
                             
-                        finally:
-                            
-                            job_key.Delete()
-                            
+                        
+                    finally:
+                        
+                        job_key.Delete()
                         
                     
                     subscriptions = HG.client_controller.subscriptions_manager.GetSubscriptions()
@@ -2806,7 +2654,13 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                     try:
                         
+                        done_job_key = ClientThreading.JobKey()
+                        
                         ( subscriptions, edited_query_log_containers, deletee_query_log_container_names ) = controller.CallBlockingToQt( self, qt_do_it, subscriptions, missing_query_log_container_names, surplus_query_log_container_names, original_pause_status )
+                        
+                        done_job_key.SetVariable( 'popup_text_1', 'Saving subscription changes.' )
+                        
+                        controller.pub( 'message', done_job_key )
                         
                         HG.client_controller.WriteSynchronous(
                         'serialisable_atomic',
@@ -2824,6 +2678,10 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     except HydrusExceptions.CancelledException:
                         
                         HG.client_controller.subscriptions_manager.Wake()
+                        
+                    finally:
+                        
+                        done_job_key.Delete()
                         
                     
                 finally:
@@ -2859,6 +2717,27 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
+    def _ManageTagDisplayApplication( self ):
+        
+        title = 'manage where tag siblings and parents apply'
+        
+        with ClientGUITopLevelWindowsPanels.DialogEdit( self, title ) as dlg:
+            
+            ( master_service_keys_to_sibling_applicable_service_keys, master_service_keys_to_parent_applicable_service_keys ) = self._controller.Read( 'tag_display_application' )
+            
+            panel = ClientGUITags.EditTagDisplayApplication( dlg, master_service_keys_to_sibling_applicable_service_keys, master_service_keys_to_parent_applicable_service_keys )
+            
+            dlg.SetPanel( panel )
+            
+            if dlg.exec() == QW.QDialog.Accepted:
+                
+                ( edited_master_service_keys_to_sibling_applicable_service_keys, edited_master_service_keys_to_parent_applicable_service_keys ) = panel.GetValue()
+                
+                self._controller.Write( 'tag_display_application', edited_master_service_keys_to_sibling_applicable_service_keys, edited_master_service_keys_to_parent_applicable_service_keys )
+                
+            
+        
+    
     def _ManageTagParents( self ):
         
         with ClientGUITopLevelWindowsPanels.DialogManage( self, 'manage tag parents' ) as dlg:
@@ -2880,33 +2759,6 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             dlg.SetPanel( panel )
             
             dlg.exec()
-            
-        
-    
-    def _ManageTagSiblingsApplication( self ):
-        
-        title = 'manage where tag siblings apply'
-        
-        with ClientGUITopLevelWindowsPanels.DialogEdit( self, title ) as dlg:
-            
-            master_service_keys_to_applicable_service_keys = self._controller.Read( 'tag_sibling_application' )
-            
-            panel = ClientGUITags.EditTagSiblingApplication( dlg, master_service_keys_to_applicable_service_keys )
-            
-            dlg.SetPanel( panel )
-            
-            if dlg.exec() == QW.QDialog.Accepted:
-                
-                edited_master_service_keys_to_applicable_service_keys = panel.GetValue()
-                
-                job_key = ClientThreading.JobKey()
-                
-                job_key.SetVariable( 'popup_title', 'calculating new tag sibling application' )
-                
-                self._controller.pub( 'modal_message', job_key )
-                
-                self._controller.Write( 'tag_sibling_application', edited_master_service_keys_to_applicable_service_keys, job_key = job_key )
-                
             
         
     
@@ -3141,7 +2993,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         message = 'This will delete and then recreate the tag \'display\' mappings cache, which is used for user-presented tag searching, loading, and autocomplete counts. This is useful if miscounting (particularly related to siblings/parents) has somehow occurred.'
         message += os.linesep * 2
-        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang.'
+        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang. All siblings and parents will have to be resynced.'
         message += os.linesep * 2
         message += 'If you do not have a specific reason to run this, it is pointless.'
         
@@ -3157,7 +3009,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         message = 'This will delete and then recreate the entire tag \'storage\' mappings cache, which is used for raw tag searching, loading, and autocomplete counts. This is useful if miscounting has somehow occurred.'
         message += os.linesep * 2
-        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang. It necessarily involves a regeneration of the tag display mappings cache, which relies on the storage cache.'
+        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang. It necessarily involves a regeneration of the tag display mappings cache, which relies on the storage cache. All siblings and parents will have to be resynced.'
         message += os.linesep * 2
         message += 'If you do not have a specific reason to run this, it is pointless.'
         
@@ -3182,6 +3034,28 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         if result == QW.QDialog.Accepted:
             
             self._controller.Write( 'regenerate_similar_files' )
+            
+        
+    
+    def _RepairInvalidTags( self ):
+        
+        message = 'This will scan all your tags and repair any that are invalid. This might mean taking out unrenderable characters or cleaning up improper whitespace. If there is a tag collision once cleaned, it may add a (1)-style number on the end.'
+        message += os.linesep * 2
+        message += 'If you have a lot of tags, it can take a long time, during which the gui may hang. If it finds bad tags, you should restart the program once it is complete.'
+        message += os.linesep * 2
+        message += 'If you have not had tag rendering problems, there is no reason to run this.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            job_key = ClientThreading.JobKey( cancellable = True )
+            
+            job_key.SetVariable( 'popup_title', 'repairing invalid tags' )
+            
+            self._controller.pub( 'message', job_key )
+            
+            self._controller.Write( 'repair_invalid_tags', job_key = job_key )
             
         
     
@@ -3227,7 +3101,30 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             status_hook = lambda s: job_key.SetVariable( 'popup_text_1', s )
             
-            self._controller.Write( 'repopulate_tag_search_cache', status_hook = status_hook )
+            def do_it():
+                
+                self._controller.WriteSynchronous( 'repopulate_tag_search_cache', status_hook = status_hook )
+                
+                job_key.Finish()
+                
+            
+            self._controller.CallToThreadLongRunning( do_it )
+            
+        
+    
+    def _RegenerateTagParentsLookupCache( self ):
+        
+        message = 'This will delete and then recreate the tag parents lookup cache, which is used for all basic tag parents operations. This is useful if it has become damaged or otherwise desynchronised.'
+        message += os.linesep * 2
+        message += 'It should only take a second or two.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            self._controller.Write( 'regenerate_tag_parents_cache' )
             
         
     
@@ -3235,7 +3132,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         message = 'This will delete and then recreate the tag siblings lookup cache, which is used for all basic tag sibling operations. This is useful if it has become damaged or otherwise desynchronised.'
         message += os.linesep * 2
-        message += 'It may take a long time, and the gui may hang. It necessarily involves a regeneration of the tag display mappings cache, which relies on the lookup.'
+        message += 'It should only take a second or two. It necessarily involves a regeneration of the tag parents lookup cache.'
         message += os.linesep * 2
         message += 'If you do not have a specific reason to run this, it is pointless.'
         
@@ -3297,6 +3194,15 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         frame.SetPanel( panel )
         
     
+    def _ReviewTagDisplayMaintenance( self ):
+        
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'tag display maintenance' )
+        
+        panel = ClientGUITags.ReviewTagDisplayMaintenancePanel( frame )
+        
+        frame.SetPanel( panel )
+        
+    
     def _ReviewThreads( self ):
         
         frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'review threads' )
@@ -3332,6 +3238,261 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
         self._controller.pub( 'notify_new_export_folders' )
+        
+    
+    def _RunClientAPITest( self ):
+        
+        # this is not to be a comprehensive test of client api functions, but a holistic sanity check to make sure everything is wired up right at UI level, with a live functioning client
+        
+        from hydrus.client import ClientAPI
+        
+        def do_it():
+            
+            # job key
+            
+            client_api_service = HG.client_controller.services_manager.GetService( CC.CLIENT_API_SERVICE_KEY )
+            
+            port = client_api_service.GetPort()
+            
+            was_running_before = port is not None
+            
+            if not was_running_before:
+                
+                port = 6666
+                
+                client_api_service._port = port
+                
+                HG.client_controller.RestartClientServerServices()
+                
+                time.sleep( 5 )
+                
+            
+            #
+            
+            api_permissions = ClientAPI.APIPermissions( name = 'hydrus test access', basic_permissions = list( ClientAPI.ALLOWED_PERMISSIONS ), search_tag_filter = ClientTags.TagFilter() )
+            
+            access_key = api_permissions.GetAccessKey()
+            
+            HG.client_controller.client_api_manager.AddAccess( api_permissions )
+            
+            #
+            
+            try:
+                
+                job_key = ClientThreading.JobKey()
+                
+                job_key.SetVariable( 'popup_title', 'client api test' )
+                
+                HG.client_controller.pub( 'message', job_key )
+                
+                import requests
+                import json
+                
+                s = requests.Session()
+                
+                s.verify = False
+                
+                s.headers[ 'Hydrus-Client-API-Access-Key' ] = access_key.hex()
+                s.headers[ 'Content-Type' ] = 'application/json'
+                
+                if client_api_service.UseHTTPS():
+                    
+                    schema = 'https'
+                    
+                else:
+                    
+                    schema = 'http'
+                    
+                
+                api_base = '{}://127.0.0.1:{}'.format( schema, port )
+                
+                #
+                
+                r = s.get( '{}/api_version'.format( api_base ) )
+                
+                j = r.json()
+                
+                if j[ 'version' ] != HC.CLIENT_API_VERSION:
+                    
+                    HydrusData.ShowText( 'version incorrect!: {}, {}'.format( j[ 'version' ], HC.CLIENT_API_VERSION ) )
+                    
+                
+                #
+                
+                job_key.SetVariable( 'popup_text_1', 'add url test' )
+                
+                local_tag_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_TAG, ) )
+                
+                local_tag_service = random.choice( local_tag_services )
+                
+                local_tag_service_name = local_tag_service.GetName()
+                
+                samus_url = 'https://safebooru.org/index.php?page=post&s=view&id=3195917'
+                samus_hash_hex = '78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538'
+                samus_test_tag = 'client api test tag'
+                samus_test_tag_filterable = 'client api test tag filterable'
+                destination_page_name = 'client api test'
+                
+                request_args = {}
+                
+                request_args[ 'url' ] = samus_url
+                request_args[ 'destination_page_name' ] = destination_page_name
+                request_args[ 'service_names_to_additional_tags' ] = {
+                    local_tag_service_name : [ samus_test_tag ]
+                }
+                request_args[ 'filterable_tags' ] = [
+                    samus_test_tag_filterable
+                ]
+                
+                data = json.dumps( request_args )
+                
+                r = s.post( '{}/add_urls/add_url'.format( api_base ), data = data )
+                
+                time.sleep( 0.25 )
+                
+                #
+                
+                job_key.SetVariable( 'popup_text_1', 'get session test' )
+                
+                def get_client_api_page():
+                    
+                    r = s.get( '{}/manage_pages/get_pages'.format( api_base ) )
+                    
+                    pages_to_process = [ r.json()[ 'pages' ] ]
+                    pages = []
+                    
+                    while len( pages_to_process ) > 0:
+                        
+                        page_to_process = pages_to_process.pop()
+                        
+                        if page_to_process[ 'page_type' ] == ClientGUIManagement.MANAGEMENT_TYPE_PAGE_OF_PAGES:
+                            
+                            pages_to_process.extend( page_to_process[ 'pages' ] )
+                            
+                        else:
+                            
+                            pages.append( page_to_process )
+                            
+                        
+                    
+                    for page in pages:
+                        
+                        if page[ 'name' ] == destination_page_name:
+                            
+                            return page
+                            
+                        
+                    
+                
+                client_api_page = get_client_api_page()
+                
+                if client_api_page is None:
+                    
+                    raise Exception( 'Could not find download page!' )
+                    
+                
+                destination_page_key_hex = client_api_page[ 'page_key' ]
+                
+                def get_hash_ids():
+                    
+                    r = s.get( '{}/manage_pages/get_page_info?page_key={}'.format( api_base, destination_page_key_hex ) )
+                    
+                    hash_ids = r.json()[ 'page_info' ][ 'media' ][ 'hash_ids' ]
+                    
+                    return hash_ids
+                    
+                
+                hash_ids = get_hash_ids()
+                
+                if len( hash_ids ) == 0:
+                    
+                    time.sleep( 3 )
+                    
+                
+                hash_ids = get_hash_ids()
+                
+                if len( hash_ids ) == 0:
+                    
+                    raise Exception( 'The download page had no hashes!' )
+                    
+                
+                #
+                
+                def get_hash_ids_to_hashes_and_tag_info():
+                    
+                    r = s.get( '{}/get_files/file_metadata?file_ids={}'.format( api_base, json.dumps( hash_ids ) ) )
+                    
+                    hash_ids_to_hashes_and_tag_info = {}
+                    
+                    for item in r.json()[ 'metadata' ]:
+                        
+                        hash_ids_to_hashes_and_tag_info[ item[ 'file_id' ] ] = ( item[ 'hash' ], item[ 'service_names_to_statuses_to_tags' ] )
+                        
+                    
+                    return hash_ids_to_hashes_and_tag_info
+                    
+                
+                hash_ids_to_hashes_and_tag_info = get_hash_ids_to_hashes_and_tag_info()
+                
+                samus_hash_id = None
+                
+                for ( hash_id, ( hash_hex, tag_info ) ) in hash_ids_to_hashes_and_tag_info.items():
+                    
+                    if hash_hex == samus_hash_hex:
+                        
+                        samus_hash_id = hash_id
+                        
+                    
+                
+                if samus_hash_id is None:
+                    
+                    raise Exception( 'Could not find the samus hash!' )
+                    
+                
+                samus_tag_info = hash_ids_to_hashes_and_tag_info[ samus_hash_id ][1]
+                
+                if samus_test_tag not in samus_tag_info[ local_tag_service_name ][ str( HC.CONTENT_STATUS_CURRENT ) ]:
+                    
+                    raise Exception( 'Did not have the tag!' )
+                    
+                
+                #
+                
+                def qt_session_gubbins():
+                    
+                    self.ProposeSaveGUISession( 'last session' )
+                    
+                    page = self._notebook.GetPageFromPageKey( bytes.fromhex( destination_page_key_hex ) )
+                    
+                    self._notebook.ShowPage( page )
+                    
+                    self._notebook.CloseCurrentPage()
+                    
+                    self.ProposeSaveGUISession( 'last session' )
+                    
+                
+                HG.client_controller.CallBlockingToQt( HG.client_controller.gui, qt_session_gubbins )
+                
+            finally:
+                
+                #
+                
+                HG.client_controller.client_api_manager.DeleteAccess( ( access_key, ) )
+                
+                #
+                
+                if not was_running_before:
+                    
+                    client_api_service._port = None
+                    
+                    HG.client_controller.RestartClientServerServices()
+                    
+                
+                job_key.Delete()
+                
+            
+        
+        HG.client_controller.CallToThread( do_it )
         
     
     def _RunUITest( self ):
@@ -3371,6 +3532,10 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             t += 0.25
             
             HG.client_controller.CallLaterQtSafe(self, t, self.ProcessApplicationCommand, CAC.ApplicationCommand(CAC.APPLICATION_COMMAND_TYPE_SIMPLE, CAC.SIMPLE_NEW_WATCHER_DOWNLOADER_PAGE))
+            
+            t += 0.25
+            
+            HG.client_controller.CallLaterQtSafe(self, t, self.ProposeSaveGUISession, 'last session' )
             
             return page_of_pages
             
@@ -3518,6 +3683,175 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
         HG.client_controller.CallToThread( do_it )
+        
+    
+    def _RunServerTest( self ):
+        
+        def do_it():
+            
+            host = '127.0.0.1'
+            port = HC.DEFAULT_SERVER_ADMIN_PORT
+            
+            if HydrusNetworking.LocalPortInUse( port ):
+                
+                HydrusData.ShowText( 'The server appears to be already running. Either that, or something else is using port ' + str( HC.DEFAULT_SERVER_ADMIN_PORT ) + '.' )
+                
+                return
+                
+            else:
+                
+                try:
+                    
+                    HydrusData.ShowText( 'Starting server\u2026' )
+                    
+                    db_param = '-d=' + self._controller.GetDBDir()
+                    
+                    if HC.PLATFORM_WINDOWS:
+                        
+                        server_frozen_path = os.path.join( HC.BASE_DIR, 'server.exe' )
+                        
+                    else:
+                        
+                        server_frozen_path = os.path.join( HC.BASE_DIR, 'server' )
+                        
+                    
+                    if os.path.exists( server_frozen_path ):
+                        
+                        cmd = [ server_frozen_path, db_param ]
+                        
+                    else:
+                        
+                        python_executable = sys.executable
+                        
+                        if python_executable.endswith( 'client.exe' ) or python_executable.endswith( 'client' ):
+                            
+                            raise Exception( 'Could not automatically set up the server--could not find server executable or python executable.' )
+                            
+                        
+                        if 'pythonw' in python_executable:
+                            
+                            python_executable = python_executable.replace( 'pythonw', 'python' )
+                            
+                        
+                        server_script_path = os.path.join( HC.BASE_DIR, 'server.py' )
+                        
+                        cmd = [ python_executable, server_script_path, db_param ]
+                        
+                    
+                    sbp_kwargs = HydrusData.GetSubprocessKWArgs( hide_terminal = False )
+                    
+                    HydrusData.CheckProgramIsNotShuttingDown()
+                    
+                    subprocess.Popen( cmd, **sbp_kwargs )
+                    
+                    time_waited = 0
+                    
+                    while not HydrusNetworking.LocalPortInUse( port ):
+                        
+                        time.sleep( 3 )
+                        
+                        time_waited += 3
+                        
+                        if time_waited > 30:
+                            
+                            raise Exception( 'The server\'s port did not appear!' )
+                            
+                        
+                    
+                except:
+                    
+                    HydrusData.ShowText( 'I tried to start the server, but something failed!' + os.linesep + traceback.format_exc() )
+                    
+                    return
+                    
+                
+            
+            time.sleep( 5 )
+            
+            HydrusData.ShowText( 'Creating admin service\u2026' )
+            
+            admin_service_key = HydrusData.GenerateKey()
+            service_type = HC.SERVER_ADMIN
+            name = 'local server admin'
+            
+            admin_service = ClientServices.GenerateService( admin_service_key, service_type, name )
+            
+            all_services = list( self._controller.services_manager.GetServices() )
+            
+            all_services.append( admin_service )
+            
+            self._controller.SetServices( all_services )
+            
+            time.sleep( 1 )
+            
+            admin_service = self._controller.services_manager.GetService( admin_service_key ) # let's refresh it
+            
+            credentials = HydrusNetwork.Credentials( host, port )
+            
+            admin_service.SetCredentials( credentials )
+            
+            time.sleep( 1 )
+            
+            response = admin_service.Request( HC.GET, 'access_key', { 'registration_key' : b'init' } )
+            
+            access_key = response[ 'access_key' ]
+            
+            credentials = HydrusNetwork.Credentials( host, port, access_key )
+            
+            admin_service.SetCredentials( credentials )
+            
+            #
+            
+            HydrusData.ShowText( 'Admin service initialised.' )
+            
+            QP.CallAfter( ClientGUIFrames.ShowKeys, 'access', (access_key,) )
+            
+            #
+            
+            time.sleep( 5 )
+            
+            HydrusData.ShowText( 'Creating tag and file services\u2026' )
+            
+            response = admin_service.Request( HC.GET, 'services' )
+            
+            serverside_services = response[ 'services' ]
+            
+            service_key = HydrusData.GenerateKey()
+            
+            tag_service = HydrusNetwork.GenerateService( service_key, HC.TAG_REPOSITORY, 'tag service', HC.DEFAULT_SERVICE_PORT )
+            
+            serverside_services.append( tag_service )
+            
+            service_key = HydrusData.GenerateKey()
+            
+            file_service = HydrusNetwork.GenerateService( service_key, HC.FILE_REPOSITORY, 'file service', HC.DEFAULT_SERVICE_PORT + 1 )
+            
+            serverside_services.append( file_service )
+            
+            response = admin_service.Request( HC.POST, 'services', { 'services' : serverside_services } )
+            
+            service_keys_to_access_keys = response[ 'service_keys_to_access_keys' ]
+            
+            deletee_service_keys = []
+            
+            with HG.dirty_object_lock:
+                
+                self._controller.WriteSynchronous( 'update_server_services', admin_service_key, serverside_services, service_keys_to_access_keys, deletee_service_keys )
+                
+                self._controller.RefreshServices()
+                
+            
+            HydrusData.ShowText( 'Done! Check services->review services to see your new server and its services.' )
+            
+        
+        text = 'This will attempt to start the server in the same install directory as this client, initialise it, and store the resultant admin accounts in the client.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, text )
+        
+        if result == QW.QDialog.Accepted:
+            
+            self._controller.CallToThread( do_it )
+            
         
     
     def _SaveSplitterPositions( self ):
@@ -4506,17 +4840,22 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             ClientGUIMenus.AppendMenuItem( submenu, 'database integrity', 'Have the database examine all its records for internal consistency.', self._CheckDBIntegrity )
             ClientGUIMenus.AppendMenuItem( submenu, 'repopulate truncated mappings tables', 'Use the mappings cache to try to repair a previously damaged mappings file.', self._RepopulateMappingsTables )
+            ClientGUIMenus.AppendMenuItem( submenu, 'fix invalid tags', 'Scan the database for invalid tags.', self._RepairInvalidTags )
             
             ClientGUIMenus.AppendMenu( menu, submenu, 'check and repair' )
             
             submenu = QW.QMenu( menu )
             
-            ClientGUIMenus.AppendMenuItem( submenu, 'clear service info cache', 'Delete all cached service info like total number of mappings or files, in case it has become desynchronised. Some parts of the gui may be laggy immediately after this as these numbers are recalculated.', self._DeleteServiceInfo )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag search cache', 'Repopulate the cache hydrus uses for fast tag search.', self._RepopulateTagSearchCache )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag siblings lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagSiblingsLookupCache )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag mappings cache', 'Delete and recreate the tag mappings cache, fixing any miscounts.', self._RegenerateTagMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag storage mappings cache', 'Delete and recreate the tag mappings cache, fixing any miscounts.', self._RegenerateTagMappingsCache )
             ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache', 'Delete and recreate the tag display mappings cache, fixing any miscounts.', self._RegenerateTagDisplayMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag siblings lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagSiblingsLookupCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag parents lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagParentsLookupCache )
+            
+            ClientGUIMenus.AppendSeparator( submenu )
+            
+            ClientGUIMenus.AppendMenuItem( submenu, 'clear service info cache', 'Delete all cached service info like total number of mappings or files, in case it has become desynchronised. Some parts of the gui may be laggy immediately after this as these numbers are recalculated.', self._DeleteServiceInfo )
             ClientGUIMenus.AppendMenuItem( submenu, 'similar files search tree', 'Delete and recreate the similar files search tree.', self._RegenerateSimilarFilesTree )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag definition search cache', 'Repopulate the cache hydrus uses for fast tag search.', self._RepopulateTagSearchCache )
             
             ClientGUIMenus.AppendMenu( menu, submenu, 'regenerate' )
             
@@ -4694,6 +5033,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                     can_overrule_account_types = service.HasPermission( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_OVERRULE )
                     
                     if can_create_accounts:
+                        
                         ClientGUIMenus.AppendMenuItem( submenu, 'create new accounts', 'Create new account keys for this service.', self._GenerateNewAccounts, service_key )
                         
                     
@@ -4704,6 +5044,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                         
                     
                     if can_overrule_accounts and service.GetServiceType() == HC.FILE_REPOSITORY:
+                        
                         ClientGUIMenus.AppendMenuItem( submenu, 'get an uploader\'s ip address', 'Fetch the ip address that uploaded a specific file, if the service knows it.', self._FetchIP, service_key )
                         
                     
@@ -4771,19 +5112,52 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             ClientGUIMenus.AppendMenuItem( menu, 'import repository update files', 'Add repository update files to the database.', self._ImportUpdateFiles )
             
-            ClientGUIMenus.AppendSeparator( menu )
+            return ( menu, '&services' )
             
-            ClientGUIMenus.AppendMenuItem( menu, 'tag migration', 'Migrate tags from one place to another.', self._MigrateTags )
+        
+        def tags():
+            
+            menu = QW.QMenu( self )
+            
+            ClientGUIMenus.AppendMenuItem( menu, 'migrate tags', 'Migrate tags from one place to another.', self._MigrateTags )
             
             ClientGUIMenus.AppendSeparator( menu )
             
             ClientGUIMenus.AppendMenuItem( menu, 'manage tag display and search', 'Set which tags you want to see from which services.', self._ManageTagDisplay )
-            ClientGUIMenus.AppendMenuItem( menu, 'manage where tag siblings apply', 'Set certain tags to be automatically replaced with other tags.', self._ManageTagSiblingsApplication )
+            
+            ClientGUIMenus.AppendSeparator( menu )
+            
             ClientGUIMenus.AppendMenuItem( menu, 'manage tag siblings', 'Set certain tags to be automatically replaced with other tags.', self._ManageTagSiblings )
-            #ClientGUIMenus.AppendMenuItem( menu, 'manage where tag parents apply', 'Set certain tags to be automatically replaced with other tags.', self._ManageTagParentsApplication )
             ClientGUIMenus.AppendMenuItem( menu, 'manage tag parents', 'Set certain tags to be automatically added with other tags.', self._ManageTagParents )
             
-            return ( menu, '&services' )
+            ClientGUIMenus.AppendMenuItem( menu, 'manage where tag siblings and parents apply', 'Set which services\' siblings and parents apply where.', self._ManageTagDisplayApplication )
+            
+            #
+            
+            tag_display_maintenance_menu = QW.QMenu( menu )
+            
+            ClientGUIMenus.AppendMenuItem( tag_display_maintenance_menu, 'review tag sibling/parent maintenance', 'See how siblings and parents are currently applied.', self._ReviewTagDisplayMaintenance )
+            ClientGUIMenus.AppendSeparator( tag_display_maintenance_menu )
+            
+            check_manager = ClientGUICommon.CheckboxManagerOptions( 'tag_display_maintenance_during_idle' )
+            
+            current_value = check_manager.GetCurrentValue()
+            func = check_manager.Invert
+            
+            ClientGUIMenus.AppendMenuCheckItem( tag_display_maintenance_menu, 'sync tag display during idle time', 'Control whether tag display maintenance can work during idle time.', current_value, func )
+            
+            check_manager = ClientGUICommon.CheckboxManagerOptions( 'tag_display_maintenance_during_active' )
+            
+            current_value = check_manager.GetCurrentValue()
+            func = check_manager.Invert
+            
+            ClientGUIMenus.AppendMenuCheckItem( tag_display_maintenance_menu, 'sync tag display during normal time', 'Control whether tag display maintenance can work during normal time.', current_value, func )
+            
+            ClientGUIMenus.AppendMenu( menu, tag_display_maintenance_menu, 'sibling/parent sync' )
+            
+            #
+            
+            return ( menu, '&tags' )
             
         
         def help():
@@ -4883,7 +5257,6 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make a parentless text ctrl dialog', 'Make a parentless text control in a dialog to test some character event catching.', self._DebugMakeParentlessTextCtrl )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'force a main gui layout now', 'Tell the gui to relayout--useful to test some gui bootup layout issues.', self.adjustSize )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'save \'last session\' gui session', 'Make an immediate save of the \'last session\' gui session. Mostly for testing crashes, where last session is not saved correctly.', self.ProposeSaveGUISession, 'last session' )
-            ClientGUIMenus.AppendMenuItem( gui_actions, 'run the ui test', 'Run hydrus_dev\'s weekly UI Test. Guaranteed to work and not mess up your session, ha ha.', self._RunUITest )
             
             ClientGUIMenus.AppendMenu( debug, gui_actions, 'gui actions' )
             
@@ -4917,7 +5290,13 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             ClientGUIMenus.AppendMenu( debug, network_actions, 'network actions' )
             
-            ClientGUIMenus.AppendMenuItem( debug, 'run and initialise server for testing', 'This will try to boot the server in your install folder and initialise it. This is mostly here for testing purposes.', self._AutoServerSetup )
+            tests = QW.QMenu( debug )
+            
+            ClientGUIMenus.AppendMenuItem( tests, 'run the ui test', 'Run hydrus_dev\'s weekly UI Test. Guaranteed to work and not mess up your session, ha ha.', self._RunUITest )
+            ClientGUIMenus.AppendMenuItem( tests, 'run the client api test', 'Run hydrus_dev\'s weekly Client API Test. Guaranteed to work and not mess up your session, ha ha.', self._RunClientAPITest )
+            ClientGUIMenus.AppendMenuItem( tests, 'run the server test', 'This will try to boot the server in your install folder and initialise it. This is mostly here for testing purposes.', self._RunServerTest )
+            
+            ClientGUIMenus.AppendMenu( debug, tests, 'tests, do not touch' )
             
             ClientGUIMenus.AppendMenu( menu, debug, 'debug' )
             
@@ -4933,6 +5312,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         elif name == 'database': result = database()
         elif name == 'network': result = network()
         elif name == 'services': result = services()
+        elif name == 'tags': result = tags()
         elif name == 'help': result = help()
         
         # hackery dackery doo
@@ -4994,10 +5374,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             for name in export_folder_names:
                 
-                ClientGUIMenus.AppendMenuItem( submenu, name, 'Check this export folder now.', self._RunExportFolder, name )
+                ClientGUIMenus.AppendMenuItem( submenu, name, 'Run this export folder now.', self._RunExportFolder, name )
                 
             
-            ClientGUIMenus.AppendMenu( i_and_e_submenu, submenu, 'check export folder now' )
+            ClientGUIMenus.AppendMenu( i_and_e_submenu, submenu, 'run export folder now' )
             
         
         ClientGUIMenus.AppendSeparator( i_and_e_submenu )
@@ -5437,11 +5817,11 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         self._ImportFiles( paths )
         
     
-    def ImportURLFromAPI( self, url, service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page ):
+    def ImportURLFromAPI( self, url, filterable_tags, additional_service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page ):
         
         try:
             
-            ( normalised_url, result_text ) = self._ImportURL( url, service_keys_to_tags = service_keys_to_tags, destination_page_name = destination_page_name, destination_page_key = destination_page_key, show_destination_page = show_destination_page )
+            ( normalised_url, result_text ) = self._ImportURL( url, filterable_tags = filterable_tags, additional_service_keys_to_tags = additional_service_keys_to_tags, destination_page_name = destination_page_name, destination_page_key = destination_page_key, show_destination_page = show_destination_page )
             
             return ( normalised_url, result_text )
             
@@ -5504,9 +5884,9 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         self._canvas_frames = [ frame for frame in self._canvas_frames if QP.isValid( frame ) ]
         
     
-    def NewPageImportHDD( self, paths, file_import_options, paths_to_service_keys_to_tags, delete_after_success ):
+    def NewPageImportHDD( self, paths, file_import_options, paths_to_additional_service_keys_to_tags, delete_after_success ):
         
-        management_controller = ClientGUIManagement.CreateManagementControllerImportHDD( paths, file_import_options, paths_to_service_keys_to_tags, delete_after_success )
+        management_controller = ClientGUIManagement.CreateManagementControllerImportHDD( paths, file_import_options, paths_to_additional_service_keys_to_tags, delete_after_success )
         
         self._notebook.NewPage( management_controller, on_deepest_notebook = True )
         
@@ -5655,6 +6035,22 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                 
                 self.HideToSystemTray()
                 
+            elif action == CAC.SIMPLE_MOVE_PAGES_SELECTION_LEFT:
+                
+                self._notebook.MoveSelection( -1 )
+                
+            elif action == CAC.SIMPLE_MOVE_PAGES_SELECTION_RIGHT:
+                
+                self._notebook.MoveSelection( 1 )
+                
+            elif action == CAC.SIMPLE_MOVE_PAGES_SELECTION_HOME:
+                
+                self._notebook.MoveSelectionEnd( -1 )
+                
+            elif action == CAC.SIMPLE_MOVE_PAGES_SELECTION_END:
+                
+                self._notebook.MoveSelectionEnd( 1 )
+                
             elif action == CAC.SIMPLE_REFRESH:
                 
                 self._Refresh()
@@ -5709,6 +6105,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             elif action == CAC.SIMPLE_UNCLOSE_PAGE:
                 
                 self._UnclosePage()
+                
+            elif action == CAC.SIMPLE_RUN_ALL_EXPORT_FOLDERS:
+                
+                self._RunExportFolder()
                 
             elif action == CAC.SIMPLE_CHECK_ALL_IMPORT_FOLDERS:
                 

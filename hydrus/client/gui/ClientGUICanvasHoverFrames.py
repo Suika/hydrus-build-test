@@ -106,7 +106,7 @@ class RatingLikeCanvas( ClientGUIRatings.RatingLike ):
                         
                         hashes = content_update.GetHashes()
                         
-                        if len( self._hashes.intersection( hashes ) ) > 0:
+                        if HydrusData.SetsIntersect( self._hashes, hashes ):
                             
                             self._dirty = True
                             
@@ -218,7 +218,7 @@ class RatingNumericalCanvas( ClientGUIRatings.RatingNumerical ):
                         
                         hashes = content_update.GetHashes()
                         
-                        if len( self._hashes.intersection( hashes ) ) > 0:
+                        if HydrusData.SetsIntersect( self._hashes, hashes ):
                             
                             self._dirty = True
                             
@@ -617,7 +617,6 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
             
             QP.AddToLayout( self._comparison_statements_vbox, panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
             
-        
         
         #
         

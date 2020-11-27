@@ -131,7 +131,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'set_search_focus_on_page_change' ] = False
         
         self._dictionary[ 'booleans' ][ 'allow_remove_on_manage_tags_input' ] = True
-        self._dictionary[ 'booleans' ][ 'add_parents_on_manage_tags' ] = True
         self._dictionary[ 'booleans' ][ 'yes_no_on_remove_on_manage_tags' ] = True
         
         self._dictionary[ 'booleans' ][ 'activate_window_on_tag_search_page_activation' ] = False
@@ -171,14 +170,15 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'file_maintenance_during_idle' ] = True
         self._dictionary[ 'booleans' ][ 'file_maintenance_during_active' ] = True
         
+        self._dictionary[ 'booleans' ][ 'tag_display_maintenance_during_idle' ] = True
+        self._dictionary[ 'booleans' ][ 'tag_display_maintenance_during_active' ] = True
+        
         self._dictionary[ 'booleans' ][ 'save_page_sort_on_change' ] = False
         
         self._dictionary[ 'booleans' ][ 'pause_all_new_network_traffic' ] = False
         self._dictionary[ 'booleans' ][ 'pause_all_file_queues' ] = False
         self._dictionary[ 'booleans' ][ 'pause_all_watcher_checkers' ] = False
         self._dictionary[ 'booleans' ][ 'pause_all_gallery_searches' ] = False
-        
-        self._dictionary[ 'booleans' ][ 'notebook_tabs_on_left' ] = False
         
         self._dictionary[ 'booleans' ][ 'popup_message_force_min_width' ] = False
         
@@ -201,6 +201,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'file_viewing_statistics_active' ] = True
         self._dictionary[ 'booleans' ][ 'file_viewing_statistics_active_on_dupe_filter' ] = False
         
+        self._dictionary[ 'booleans' ][ 'prefix_hash_when_copying' ] = False
         self._dictionary[ 'booleans' ][ 'file_system_waits_on_wakeup' ] = False
         
         self._dictionary[ 'booleans' ][ 'always_show_system_everything' ] = False
@@ -279,6 +280,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         #
         
         self._dictionary[ 'integers' ] = {}
+        
+        self._dictionary[ 'integers' ][ 'notebook_tab_alignment' ] = CC.DIRECTION_UP
         
         self._dictionary[ 'integers' ][ 'video_buffer_size_mb' ] = 96
         
@@ -423,6 +426,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'noneable_strings' ][ 'media_background_bmp_path' ] = None
         self._dictionary[ 'noneable_strings' ][ 'http_proxy' ] = None
         self._dictionary[ 'noneable_strings' ][ 'https_proxy' ] = None
+        self._dictionary[ 'noneable_strings' ][ 'no_proxy' ] = '127.0.0.1'
         self._dictionary[ 'noneable_strings' ][ 'qt_style_name' ] = None
         self._dictionary[ 'noneable_strings' ][ 'qt_stylesheet_name' ] = None
         
@@ -445,6 +449,12 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'string_list' ][ 'default_media_viewer_custom_shortcuts' ] = []
         self._dictionary[ 'string_list' ][ 'favourite_tags' ] = []
         self._dictionary[ 'string_list' ][ 'advanced_file_deletion_reasons' ] = [ 'I do not like it.', 'It is bad quality.', 'It is not appropriate for this client.', 'Temporary delete--I want to bring it back later.' ]
+        
+        #
+        
+        self._dictionary[ 'custom_default_predicates' ] = HydrusSerialisable.SerialisableList()
+        
+        self._dictionary[ 'predicate_types_to_recent_predicates' ] = HydrusSerialisable.SerialisableDictionary()
         
         #
         
@@ -771,6 +781,32 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def ClearCustomDefaultSystemPredicates( self, predicate_type = None, comparable_predicate = None ):
+        
+        with self._lock:
+            
+            custom_default_predicates = self._dictionary[ 'custom_default_predicates' ]
+            
+            if predicate_type is not None:
+                
+                new_custom_default_predicates = HydrusSerialisable.SerialisableList( [ pred for pred in custom_default_predicates if pred.GetType() != predicate_type ] )
+                
+                self._dictionary[ 'custom_default_predicates' ] = new_custom_default_predicates
+                
+                return
+                
+            
+            if comparable_predicate is not None:
+                
+                new_custom_default_predicates = HydrusSerialisable.SerialisableList( [ pred for pred in custom_default_predicates if not pred.IsUIEditable( comparable_predicate ) ] )
+                
+                self._dictionary[ 'custom_default_predicates' ] = new_custom_default_predicates
+                
+                return
+                
+            
+        
+    
     def FlipBoolean( self, name ):
         
         with self._lock:
@@ -807,6 +843,26 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             ( r, g, b ) = self._dictionary[ 'colours' ][ colourset ][ colour_type ]
             
             return QG.QColor( r, g, b )
+            
+        
+    
+    def GetCustomDefaultSystemPredicates( self, predicate_type = None, comparable_predicate = None ):
+        
+        with self._lock:
+            
+            custom_default_predicates = self._dictionary[ 'custom_default_predicates' ]
+            
+            if predicate_type is not None:
+                
+                return [ pred for pred in custom_default_predicates if pred.GetType() == predicate_type ]
+                
+            
+            if comparable_predicate is not None:
+                
+                return [ pred for pred in custom_default_predicates if pred.IsUIEditable( comparable_predicate ) ]
+                
+            
+            return []
             
         
     
@@ -1022,6 +1078,26 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def GetRecentPredicates( self, predicate_types ):
+        
+        with self._lock:
+            
+            result = []
+            
+            predicate_types_to_recent_predicates = self._dictionary[ 'predicate_types_to_recent_predicates' ]
+            
+            for predicate_type in predicate_types:
+                
+                if predicate_type in predicate_types_to_recent_predicates:
+                    
+                    result.extend( predicate_types_to_recent_predicates[ predicate_type ] )
+                    
+                
+            
+            return result
+            
+        
+    
     def GetSimpleDownloaderFormulae( self ):
         
         with self._lock:
@@ -1081,6 +1157,38 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def PushRecentPredicates( self, predicates ):
+        
+        with self._lock:
+            
+            predicate_types_to_recent_predicates = self._dictionary[ 'predicate_types_to_recent_predicates' ]
+            
+            for predicate in predicates:
+                
+                predicate_type = predicate.GetType()
+                
+                if predicate_type not in predicate_types_to_recent_predicates:
+                    
+                    predicate_types_to_recent_predicates[ predicate_type ] = HydrusSerialisable.SerialisableList()
+                    
+                
+                recent_predicates = predicate_types_to_recent_predicates[ predicate_type ]
+                
+                if predicate in recent_predicates:
+                    
+                    recent_predicates.remove( predicate )
+                    
+                
+                recent_predicates.insert( 0, predicate )
+                
+                while len( recent_predicates ) > 5:
+                    
+                    recent_predicates.pop( 5 )
+                    
+                
+            
+        
+    
     def SetBoolean( self, name, value ):
         
         with self._lock:
@@ -1113,6 +1221,44 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
                 
             
             self._dictionary[ 'colours' ][ colourset ][ colour_type ] = ( r, g, b )
+            
+        
+    
+    def SetCustomDefaultSystemPredicates( self, predicate_type = None, predicates = None, comparable_predicates = None ):
+        
+        with self._lock:
+            
+            custom_default_predicates = self._dictionary[ 'custom_default_predicates' ]
+            
+            if predicate_type is not None and predicates is not None:
+                
+                new_custom_default_predicates = HydrusSerialisable.SerialisableList( [ pred for pred in custom_default_predicates if pred.GetType() != predicate_type ] )
+                
+                new_custom_default_predicates.extend( predicates )
+                
+                self._dictionary[ 'custom_default_predicates' ] = new_custom_default_predicates
+                
+                return
+                
+            
+            if comparable_predicates is not None:
+                
+                new_custom_default_predicates = HydrusSerialisable.SerialisableList()
+                
+                for pred in custom_default_predicates:
+                    
+                    if True not in ( pred.IsUIEditable( comparable_predicate ) for comparable_predicate in comparable_predicates ):
+                        
+                        new_custom_default_predicates.append( pred )
+                        
+                    
+                
+                new_custom_default_predicates.extend( comparable_predicates )
+                
+                self._dictionary[ 'custom_default_predicates' ] = new_custom_default_predicates
+                
+                return
+                
             
         
     

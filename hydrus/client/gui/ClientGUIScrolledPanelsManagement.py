@@ -19,14 +19,13 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
-from hydrus.client.gui import ClientGUIACDropdown
 from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIControls
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIImport
-from hydrus.client.gui import ClientGUISearch
+from hydrus.client.gui import ClientGUIResultsSortCollect
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIScrolledPanelsEdit
 from hydrus.client.gui import ClientGUIShortcuts
@@ -37,6 +36,8 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.search import ClientGUIACDropdown
+from hydrus.client.gui.search import ClientGUISearch
 from hydrus.client.media import ClientMedia
 from hydrus.client.networking import ClientNetworkingSessions
 
@@ -61,7 +62,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         self._listbook.AddPage( 'media', 'media', self._MediaPanel( self._listbook ) )
         self._listbook.AddPage( 'audio', 'audio', self._AudioPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'system tray', 'system tray', self._SystemTrayPanel( self._listbook, self._new_options ) )
-        #self._listbook.AddPage( 'default system predicates', 'default system predicates', self._DefaultFileSystemPredicatesPanel( self._listbook, self._new_options ) )
+        self._listbook.AddPage( 'search', 'search', self._SearchPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'colours', 'colours', self._ColoursPanel( self._listbook ) )
         self._listbook.AddPage( 'regex favourites', 'regex favourites', self._RegexPanel( self._listbook ) )
         self._listbook.AddPage( 'sort/collect', 'sort/collect', self._SortCollectPanel( self._listbook ) )
@@ -315,6 +316,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._http_proxy = ClientGUICommon.NoneableTextCtrl( proxy_panel )
             self._https_proxy = ClientGUICommon.NoneableTextCtrl( proxy_panel )
+            self._no_proxy = ClientGUICommon.NoneableTextCtrl( proxy_panel )
             
             #
             
@@ -322,6 +324,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._http_proxy.SetValue( self._new_options.GetNoneableString( 'http_proxy' ) )
             self._https_proxy.SetValue( self._new_options.GetNoneableString( 'https_proxy' ) )
+            self._no_proxy.SetValue( self._new_options.GetNoneableString( 'no_proxy' ) )
             
             self._network_timeout.setValue( self._new_options.GetInteger( 'network_timeout' ) )
             self._connection_error_wait_time.setValue( self._new_options.GetInteger( 'connection_error_wait_time' ) )
@@ -363,7 +366,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             general.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
             
-            text = 'Enter strings such as "http://ip:port" or "http://user:pass@ip:port". It should take affect immediately on dialog ok.'
+            text = 'Enter strings such as "http://ip:port" or "http://user:pass@ip:port" to use for http and https traffic. It should take effect immediately on dialog ok.'
+            text += os.linesep * 2
+            text += 'no_proxy takes the form of comma-separated hosts/domains, just as in curl or the NO_PROXY environment variable. When http and/or https proxies are set, they will not be used for these.'
             text += os.linesep * 2
             
             if ClientNetworkingSessions.SOCKS_PROXY_OK:
@@ -387,6 +392,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows.append( ( 'http: ', self._http_proxy ) )
             rows.append( ( 'https: ', self._https_proxy ) )
+            rows.append( ( 'no_proxy: ', self._no_proxy ) )
             
             gridbox = ClientGUICommon.WrapInGrid( proxy_panel, rows )
             
@@ -409,6 +415,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options.SetNoneableString( 'http_proxy', self._http_proxy.GetValue() )
             self._new_options.SetNoneableString( 'https_proxy', self._https_proxy.GetValue() )
+            self._new_options.SetNoneableString( 'no_proxy', self._no_proxy.GetValue() )
             
             self._new_options.SetInteger( 'network_timeout', self._network_timeout.value() )
             self._new_options.SetInteger( 'connection_error_wait_time', self._connection_error_wait_time.value() )
@@ -725,7 +732,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
         
     
-    class _DefaultFileSystemPredicatesPanel( QW.QWidget ):
+    class _SearchPanel( QW.QWidget ):
         
         def __init__( self, parent, new_options ):
             
@@ -742,35 +749,13 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._filter_inbox_and_archive_predicates.setChecked( self._new_options.GetBoolean( 'filter_inbox_and_archive_predicates' ) )
             
-            self._file_system_predicate_age = ClientGUISearch.PanelPredicateSystemAgeDelta( self )
-            self._file_system_predicate_duration = ClientGUISearch.PanelPredicateSystemDuration( self )
-            self._file_system_predicate_height = ClientGUISearch.PanelPredicateSystemHeight( self )
-            self._file_system_predicate_limit = ClientGUISearch.PanelPredicateSystemLimit( self )
-            self._file_system_predicate_mime = ClientGUISearch.PanelPredicateSystemMime( self )
-            self._file_system_predicate_num_pixels = ClientGUISearch.PanelPredicateSystemNumPixels( self )
-            self._file_system_predicate_num_words = ClientGUISearch.PanelPredicateSystemNumWords( self )
-            self._file_system_predicate_ratio = ClientGUISearch.PanelPredicateSystemRatio( self )
-            self._file_system_predicate_similar_to = ClientGUISearch.PanelPredicateSystemSimilarTo( self )
-            self._file_system_predicate_size = ClientGUISearch.PanelPredicateSystemSize( self )
-            self._file_system_predicate_width = ClientGUISearch.PanelPredicateSystemWidth( self )
-            
             #
             
             vbox = QP.VBoxLayout()
             
             QP.AddToLayout( vbox, self._always_show_system_everything, CC.FLAGS_EXPAND_PERPENDICULAR )
             QP.AddToLayout( vbox, self._filter_inbox_and_archive_predicates, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_age, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_duration, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_height, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_limit, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_mime, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_num_pixels, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_num_words, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_ratio, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_similar_to, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_size, CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._file_system_predicate_width, CC.FLAGS_EXPAND_PERPENDICULAR )
+            
             vbox.addStretch( 1 )
             
             self.setLayout( vbox )
@@ -780,22 +765,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options.SetBoolean( 'always_show_system_everything', self._always_show_system_everything.isChecked() )
             self._new_options.SetBoolean( 'filter_inbox_and_archive_predicates', self._filter_inbox_and_archive_predicates.isChecked() )
-            
-            system_predicates = HC.options[ 'file_system_predicates' ]
-            
-            system_predicates[ 'age' ] = self._file_system_predicate_age.GetInfo()
-            system_predicates[ 'duration' ] = self._file_system_predicate_duration.GetInfo()
-            system_predicates[ 'hamming_distance' ] = self._file_system_predicate_similar_to.GetInfo()[1]
-            system_predicates[ 'height' ] = self._file_system_predicate_height.GetInfo()
-            system_predicates[ 'limit' ] = self._file_system_predicate_limit.GetInfo()
-            system_predicates[ 'mime' ] = self._file_system_predicate_mime.GetInfo()
-            system_predicates[ 'num_pixels' ] = self._file_system_predicate_num_pixels.GetInfo()
-            system_predicates[ 'num_words' ] = self._file_system_predicate_num_words.GetInfo()
-            system_predicates[ 'ratio' ] = self._file_system_predicate_ratio.GetInfo()
-            system_predicates[ 'size' ] = self._file_system_predicate_size.GetInfo()
-            system_predicates[ 'width' ] = self._file_system_predicate_width.GetInfo()
-            
-            HC.options[ 'file_system_predicates' ] = system_predicates
             
         
     
@@ -864,7 +833,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             if launch_path is None:
                 
-                pretty_launch_path = 'default: ' + HydrusPaths.GetDefaultLaunchPath()
+                pretty_launch_path = 'default: {}'.format( HydrusPaths.GetDefaultLaunchPath() )
                 
             else:
                 
@@ -881,7 +850,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             for ( mime, launch_path ) in self._mime_launch_listctrl.GetData( only_selected = True ):
                 
-                message = 'Enter the new launch path for ' + HC.mime_string_lookup[ mime ]
+                message = 'Enter the new launch path for {}'.format( HC.mime_string_lookup[ mime ] )
                 message += os.linesep * 2
                 message += 'Hydrus will insert the file\'s full path wherever you put %path%, even multiple times!'
                 message += os.linesep * 2
@@ -952,6 +921,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._export_location = QP.DirPickerCtrl( self )
             
+            self._prefix_hash_when_copying = QW.QCheckBox( self )
+            self._prefix_hash_when_copying.setToolTip( 'If you often paste hashes into boorus, check this to automatically prefix with the type, like "md5:2496dabcbd69e3c56a5d8caabb7acde5".' )
+            
             self._file_system_waits_on_wakeup = QW.QCheckBox( self )
             self._file_system_waits_on_wakeup.setToolTip( 'This is useful if your hydrus is stored on a NAS that takes a few seconds to get going after your machine resumes from sleep.' )
             
@@ -985,6 +957,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                     
                 
             
+            self._prefix_hash_when_copying.setChecked( self._new_options.GetBoolean( 'prefix_hash_when_copying' ) )
+            
             self._file_system_waits_on_wakeup.setChecked( self._new_options.GetBoolean( 'file_system_waits_on_wakeup' ) )
             
             self._delete_to_recycle_bin.setChecked( HC.options[ 'delete_to_recycle_bin' ] )
@@ -1016,9 +990,10 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows = []
             
+            rows.append( ( 'When copying a file hashes, prefix with booru-friendly hash type: ', self._prefix_hash_when_copying ) )
+            rows.append( ( 'Wait 15s after computer resume before accessing files: ', self._file_system_waits_on_wakeup ) )
             rows.append( ( 'Confirm sending files to trash: ', self._confirm_trash ) )
             rows.append( ( 'Confirm sending more than one file to archive or inbox: ', self._confirm_archive ) )
-            rows.append( ( 'Wait 15s after computer resume before accessing files: ', self._file_system_waits_on_wakeup ) )
             rows.append( ( 'When deleting files or folders, send them to the OS\'s recycle bin: ', self._delete_to_recycle_bin ) )
             rows.append( ( 'Remove files from view when they are filtered: ', self._remove_filtered_files ) )
             rows.append( ( 'Remove files from view when they are sent to the trash: ', self._remove_trashed_files ) )
@@ -1084,6 +1059,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             HC.options[ 'export_path' ] = HydrusPaths.ConvertAbsPathToPortablePath( self._export_location.GetPath() )
             
+            self._new_options.SetBoolean( 'prefix_hash_when_copying', self._prefix_hash_when_copying.isChecked() )
             self._new_options.SetBoolean( 'file_system_waits_on_wakeup', self._file_system_waits_on_wakeup.isChecked() )
             
             HC.options[ 'delete_to_recycle_bin' ] = self._delete_to_recycle_bin.isChecked()
@@ -1421,7 +1397,12 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 self._default_new_page_goes.addItem( CC.new_page_goes_string_lookup[ value], value )
                 
             
-            self._notebook_tabs_on_left = QW.QCheckBox( self._pages_panel )
+            self._notebook_tab_alignment = ClientGUICommon.BetterChoice( self._pages_panel )
+            
+            for value in [ CC.DIRECTION_UP, CC.DIRECTION_LEFT, CC.DIRECTION_RIGHT, CC.DIRECTION_DOWN ]:
+                
+                self._notebook_tab_alignment.addItem( CC.directions_alignment_string_lookup[ value ], value )
+                
             
             self._total_pages_warning = QP.MakeQSpinBox( self._pages_panel, min=5, max=500 )
             
@@ -1491,7 +1472,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._default_new_page_goes.SetValue( self._new_options.GetInteger( 'default_new_page_goes' ) )
             
-            self._notebook_tabs_on_left.setChecked( self._new_options.GetBoolean( 'notebook_tabs_on_left' ) )
+            self._notebook_tab_alignment.SetValue( self._new_options.GetInteger( 'notebook_tab_alignment' ) )
             
             self._max_page_name_chars.setValue( self._new_options.GetInteger( 'max_page_name_chars' ) )
             
@@ -1531,7 +1512,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows = []
             
             rows.append( ( 'By default, put new page tabs on (requires restart): ', self._default_new_page_goes ) )
-            rows.append( ( 'Line notebook tabs down the left: ', self._notebook_tabs_on_left ) )
+            rows.append( ( 'Notebook tab alignment: ', self._notebook_tab_alignment ) )
             rows.append( ( 'Reverse page tab shift-drag behaviour: ', self._reverse_page_shift_drag_behaviour ) )
             rows.append( ( 'Warn at this many total pages: ', self._total_pages_warning ) )
             
@@ -1592,7 +1573,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             HC.options[ 'default_gui_session' ] = self._default_gui_session.currentText()
             
-            self._new_options.SetBoolean( 'notebook_tabs_on_left', self._notebook_tabs_on_left.isChecked() )
+            self._new_options.SetInteger( 'notebook_tab_alignment', self._notebook_tab_alignment.GetValue() )
             
             self._new_options.SetInteger( 'last_session_save_period_minutes', self._last_session_save_period_minutes.value() )
             
@@ -2145,7 +2126,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 pretty_preview_show_action += ', start with embed button'
                 
             
-            no_show = len( set( ( media_show_action, preview_show_action ) ).intersection( { CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV } ) ) == 0
+            no_show = { media_show_action, preview_show_action }.isdisjoint( { CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV } )
             
             if no_show:
                 
@@ -2354,13 +2335,13 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             QW.QWidget.__init__( self, parent )
             
-            self._default_media_sort = ClientGUISearch.MediaSortControl( self )
+            self._default_media_sort = ClientGUIResultsSortCollect.MediaSortControl( self )
             
-            self._fallback_media_sort = ClientGUISearch.MediaSortControl( self )
+            self._fallback_media_sort = ClientGUIResultsSortCollect.MediaSortControl( self )
             
             self._save_page_sort_on_change = QW.QCheckBox( self )
             
-            self._default_media_collect = ClientGUISearch.MediaCollectControl( self, silent = True )
+            self._default_media_collect = ClientGUIResultsSortCollect.MediaCollectControl( self, silent = True )
             
             namespace_sorting_box = ClientGUICommon.StaticBox( self, 'namespace sorting' )
             
@@ -3008,7 +2989,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             expand_parents = False
             
-            self._favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( favourites_panel, show_sibling_text = False )
+            self._favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( favourites_panel, show_display_decorators = False )
             self._favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( favourites_panel, self._favourites.AddTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
             
             #

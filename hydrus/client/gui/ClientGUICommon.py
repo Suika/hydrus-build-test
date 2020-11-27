@@ -449,6 +449,19 @@ class BetterRadioBox( QP.RadioBox ):
         return self._indices_to_data[ index ]
         
     
+    def SetValue( self, data ):
+        
+        for ( i, d ) in self._indices_to_data.items():
+            
+            if d == data:
+                
+                self.Select( i )
+                
+                return
+                
+            
+        
+    
 class BetterStaticText( QP.EllipsizedLabel ):
     
     def __init__( self, parent, label = None, tooltip_label = False, **kwargs ):
@@ -673,6 +686,7 @@ class CheckboxManagerOptions( CheckboxManager ):
         new_options.InvertBoolean( self._boolean_name )
         
         HG.client_controller.pub( 'checkbox_manager_inverted' )
+        HG.client_controller.pub( 'notify_new_menu_option' )
         
     
 class AlphaColourControl( QW.QWidget ):
@@ -1816,6 +1830,16 @@ class TextAndGauge( QW.QWidget ):
         QP.AddToLayout( vbox, self._gauge, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         self.setLayout( vbox )
+        
+    
+    def SetText( self, text ):
+        
+        if not self or not QP.isValid( self ):
+            
+            return
+            
+        
+        self._st.setText( text )
         
     
     def SetValue( self, text, value, range ):

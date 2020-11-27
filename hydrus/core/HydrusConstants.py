@@ -69,9 +69,9 @@ options = {}
 
 # Misc
 
-NETWORK_VERSION = 18
-SOFTWARE_VERSION = 411
-CLIENT_API_VERSION = 13
+NETWORK_VERSION = 19
+SOFTWARE_VERSION = 419
+CLIENT_API_VERSION = 15
 
 SERVER_THUMBNAIL_DIMENSIONS = ( 200, 200 )
 
@@ -654,7 +654,7 @@ mime_string_lookup[ GENERAL_ANIMATION ] = 'animation'
 mime_mimetype_string_lookup = {}
 
 mime_mimetype_string_lookup[ APPLICATION_HYDRUS_CLIENT_COLLECTION ] = 'collection'
-mime_mimetype_string_lookup[ IMAGE_JPEG ] = 'image/jpg'
+mime_mimetype_string_lookup[ IMAGE_JPEG ] = 'image/jpeg'
 mime_mimetype_string_lookup[ IMAGE_PNG ] = 'image/png'
 mime_mimetype_string_lookup[ IMAGE_APNG ] = 'image/apng'
 mime_mimetype_string_lookup[ IMAGE_GIF ] = 'image/gif'

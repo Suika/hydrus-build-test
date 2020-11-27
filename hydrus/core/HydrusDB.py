@@ -46,6 +46,38 @@ def CheckCanVacuum( db_path, stop_time = None ):
     
     HydrusPaths.CheckHasSpaceForDBTransaction( db_dir, vacuum_estimate )
     
+def ReadFromCancellableCursor( cursor, largest_group_size, cancelled_hook = None ):
+    
+    if cancelled_hook is None:
+        
+        return cursor.fetchall()
+        
+    
+    NUM_TO_GET = 1
+    
+    results = []
+    
+    group_of_results = cursor.fetchmany( NUM_TO_GET )
+    
+    while len( group_of_results ) > 0:
+        
+        results.extend( group_of_results )
+        
+        if cancelled_hook():
+            
+            break
+            
+        
+        if NUM_TO_GET < 1024:
+            
+            NUM_TO_GET *= 2
+            
+        
+        group_of_results = cursor.fetchmany( NUM_TO_GET )
+        
+    
+    return results
+    
 def ReadLargeIdQueryInSeparateChunks( cursor, select_statement, chunk_size ):
     
     table_name = 'tempbigread' + os.urandom( 32 ).hex()
@@ -474,7 +506,7 @@ class HydrusDB( object ):
                 
                 message = message.format( ', '.join( existing_external_db_paths ), db_path )
                 
-                raise HydrusExceptions.DBException( message )
+                raise HydrusExceptions.DBAccessException( message )
                 
             
         
@@ -507,20 +539,29 @@ class HydrusDB( object ):
         
         db_just_created = not os.path.exists( db_path )
         
-        self._db = sqlite3.connect( db_path, isolation_level = None, detect_types = sqlite3.PARSE_DECLTYPES )
-        
-        self._connection_timestamp = HydrusData.GetNow()
-        
-        self._c = self._db.cursor()
-        
-        if HG.no_db_temp_files:
+        try:
             
-            self._c.execute( 'PRAGMA temp_store = 2;' ) # use memory for temp store exclusively
+            self._db = sqlite3.connect( db_path, isolation_level = None, detect_types = sqlite3.PARSE_DECLTYPES )
             
-        
-        self._c.execute( 'ATTACH ":memory:" AS mem;' )
-        
-        self._AttachExternalDatabases()
+            self._connection_timestamp = HydrusData.GetNow()
+            
+            self._c = self._db.cursor()
+            
+            if HG.no_db_temp_files:
+                
+                self._c.execute( 'PRAGMA temp_store = 2;' ) # use memory for temp store exclusively
+                
+            
+            self._AttachExternalDatabases()
+            
+            self._c.execute( 'PRAGMA cache_size = -250000;' )
+            
+            self._c.execute( 'ATTACH ":memory:" AS mem;' )
+            
+        except Exception as e:
+            
+            raise HydrusExceptions.DBAccessException( 'Could not connect to database! This could be an issue related to WAL and network storage, or something else. If it is not obvious to you, please let hydrus dev know. Error follows:' + os.linesep * 2 + str( e ) )
+            
         
         # if this is set to 1, transactions are not immediately synced to the journal so multiple can be undone following a power-loss
         # if set to 2, all transactions are synced, so once a new one starts you know the last one is on disk

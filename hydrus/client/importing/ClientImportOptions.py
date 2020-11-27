@@ -560,9 +560,6 @@ class FilenameTaggingOptions( HydrusSerialisable.SerialisableBase ):
         
         tags = HydrusTags.CleanTags( tags )
         
-        parents_manager = HG.client_controller.tag_parents_manager
-        
-        tags = parents_manager.ExpandTags( service_key, tags )
         tags = HG.client_controller.tag_display_manager.FilterTags( ClientTags.TAG_DISPLAY_STORAGE, service_key, tags )
         
         return tags
@@ -1353,35 +1350,47 @@ class TagImportOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def GetServiceKeysToContentUpdates( self, status: int, media_result: ClientMediaResult.MediaResult, parsed_tags: typing.Iterable[ str ], external_service_keys_to_tags = None ):
+    def GetServiceKeysToContentUpdates( self, status: int, media_result: ClientMediaResult.MediaResult, filterable_tags: typing.Iterable[ str ], external_filterable_tags = None, external_additional_service_keys_to_tags = None ):
         
-        if external_service_keys_to_tags is None:
+        if external_filterable_tags is None:
             
-            external_service_keys_to_tags = dict()
+            external_filterable_tags = set()
             
         
-        parents_manager = HG.client_controller.tag_parents_manager
+        if external_additional_service_keys_to_tags is None:
+            
+            external_additional_service_keys_to_tags = ClientTags.ServiceKeysToTags()
+            
         
-        parsed_tags = HydrusTags.CleanTags( parsed_tags )
+        filterable_tags = HydrusTags.CleanTags( filterable_tags )
         
         service_keys_to_tags = ClientTags.ServiceKeysToTags()
         
-        for ( service_key, service_tag_import_options ) in self._service_keys_to_service_tag_import_options.items():
+        for service_key in HG.client_controller.services_manager.GetServiceKeys( HC.REAL_TAG_SERVICES ):
             
-            service_parsed_tags = set( parsed_tags )
+            service_additional_tags = set()
             
-            if service_key in external_service_keys_to_tags:
+            if service_key in external_additional_service_keys_to_tags:
                 
-                service_parsed_tags.update( external_service_keys_to_tags[ service_key ] )
+                service_additional_tags.update( external_additional_service_keys_to_tags[ service_key ] )
                 
             
-            service_parsed_tags = parents_manager.ExpandTags( service_key, service_parsed_tags )
-            
-            service_tags = service_tag_import_options.GetTags( service_key, status, media_result, service_parsed_tags )
+            if service_key in self._service_keys_to_service_tag_import_options:
+                
+                service_tag_import_options = self._service_keys_to_service_tag_import_options[ service_key ]
+                
+                service_filterable_tags = set( filterable_tags )
+                
+                service_filterable_tags.update( external_filterable_tags )
+                
+                service_tags = service_tag_import_options.GetTags( service_key, status, media_result, service_filterable_tags, service_additional_tags )
+                
+            else:
+                
+                service_tags = service_additional_tags
+                
             
             if len( service_tags ) > 0:
-                
-                service_tags = parents_manager.ExpandTags( service_key, service_tags )
                 
                 service_keys_to_tags[ service_key ] = service_tags
                 
@@ -1658,7 +1667,12 @@ class ServiceTagImportOptions( HydrusSerialisable.SerialisableBase ):
         return statements
         
     
-    def GetTags( self, service_key: bytes, status: int, media_result: ClientMediaResult.MediaResult, parsed_tags: typing.Iterable[ str ] ):
+    def GetTags( self, service_key: bytes, status: int, media_result: ClientMediaResult.MediaResult, filterable_tags: typing.Collection[ str ], additional_tags: typing.Optional[ typing.Collection[ str ] ] = None ):
+        
+        if additional_tags is None:
+            
+            additional_tags = set()
+            
         
         tags = set()
         
@@ -1668,7 +1682,7 @@ class ServiceTagImportOptions( HydrusSerialisable.SerialisableBase ):
             
             if self._get_tags:
                 
-                filtered_tags = self._get_tags_filter.Filter( parsed_tags )
+                filtered_tags = self._get_tags_filter.Filter( filterable_tags )
                 
                 if not self._get_tags_overwrite_deleted:
                     
@@ -1678,7 +1692,10 @@ class ServiceTagImportOptions( HydrusSerialisable.SerialisableBase ):
                 tags.update( filtered_tags )
                 
             
-            additional_tags = HydrusTags.CleanTags( self._additional_tags )
+            additional_tags = set( additional_tags )
+            additional_tags.update( self._additional_tags )
+            
+            additional_tags = HydrusTags.CleanTags( additional_tags )
             
             if not self._additional_tags_overwrite_deleted:
                 

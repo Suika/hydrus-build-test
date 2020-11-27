@@ -9,6 +9,7 @@ except:
     CHARDET_OK = False
     
 import json
+import os
 import re
 
 re_newlines = re.compile( '[\r\n]+' )
@@ -103,7 +104,7 @@ def NonFailingUnicodeDecode( data, encoding ):
     except UnicodeDecodeError:
         
         unicode_replacement_character = u'\ufffd'
-        null_character = '\0x0'
+        null_character = '\x00'
         
         text = str( data, encoding, errors = 'replace' )
         

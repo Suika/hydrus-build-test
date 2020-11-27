@@ -470,6 +470,23 @@ def MakeParsedTextPretty( parsed_text ):
     
     return parsed_text
     
+def ParseResultsHavePursuableURLs( results ):
+    
+    for ( ( name, content_type, additional_info ), parsed_text ) in results:
+        
+        if content_type == HC.CONTENT_TYPE_URLS:
+            
+            ( url_type, priority ) = additional_info
+            
+            if url_type == HC.URL_TYPE_DESIRED:
+                
+                return True
+                
+            
+        
+    
+    return False
+    
 def RenderJSONParseRule( rule ):
     
     ( parse_rule_type, parse_rule ) = rule
@@ -791,7 +808,7 @@ class ParseFormulaContextVariable( ParseFormula ):
         
         if self._variable_name in parsing_context:
             
-            raw_texts.append( parsing_context[ self._variable_name ] )
+            raw_texts.append( str( parsing_context[ self._variable_name ] ) )
             
         
         return raw_texts
@@ -1381,7 +1398,7 @@ class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
         
         if self._rule_type == HTML_RULE_TYPE_DESCENDING:
             
-            s = 'search descendents for'
+            s = 'search descendants for'
             
             if self._tag_index is None:
                 
@@ -2021,6 +2038,27 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
                         u = re.sub( r'^.*\shttp', 'http', u )
                         
                     
+                    while u.startswith( 'https://https://' ):
+                        
+                        u = u[8:]
+                        
+                    
+                    return u
+                    
+                
+                clean_parsed_texts = []
+                
+                for parsed_text in parsed_texts:
+                    
+                    if not parsed_text.startswith( 'http' ) and ( 'http://' in parsed_text or 'https://' in parsed_text ):
+                        
+                        parsed_text = clean_url( parsed_text )
+                        
+                    
+                    clean_parsed_texts.append( parsed_text )
+                    
+                
+                parsed_texts = clean_parsed_texts
                 
                 parsed_texts = [ urllib.parse.urljoin( base_url, parsed_text ) for parsed_text in parsed_texts ]
                 
@@ -2303,9 +2341,19 @@ class PageParser( HydrusSerialisable.SerialisableBaseNamed ):
         
         try:
             
+            if 'post_index' not in parsing_context:
+                
+                parsing_context[ 'post_index' ] = '0'
+                
+            
             for content_parser in self._content_parsers:
                 
                 whole_page_parse_results.extend( content_parser.Parse( parsing_context, converted_parsing_text ) )
+                
+            
+            if ParseResultsHavePursuableURLs( whole_page_parse_results ):
+                
+                parsing_context[ 'post_index' ] = str( int( parsing_context[ 'post_index' ] ) + 1 )
                 
             
         except HydrusExceptions.ParseException as e:
@@ -2345,9 +2393,16 @@ class PageParser( HydrusSerialisable.SerialisableBaseNamed ):
                 
                 for ( formula, page_parser ) in self._sub_page_parsers:
                     
-                    posts = formula.Parse( parsing_context, converted_parsing_text )
+                    try:
+                        
+                        posts = formula.Parse( parsing_context, converted_parsing_text )
+                        
+                    except HydrusExceptions.ParseException:
+                        
+                        continue
+                        
                     
-                    for post in posts:
+                    for ( i, post ) in enumerate( posts ):
                         
                         try:
                             

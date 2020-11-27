@@ -58,6 +58,7 @@ from hydrus.test import TestClientTags
 from hydrus.test import TestClientThreading
 from hydrus.test import TestDialogs
 from hydrus.test import TestFunctions
+from hydrus.test import TestHydrusNATPunch
 from hydrus.test import TestHydrusNetworking
 from hydrus.test import TestHydrusSerialisable
 from hydrus.test import TestHydrusServer
@@ -277,7 +278,7 @@ class Controller( object ):
         self.CallToThreadLongRunning( self.network_engine.MainLoop )
         
         self.tag_display_manager = ClientTagsHandling.TagDisplayManager()
-        self.tag_parents_manager = ClientManagers.TagParentsManager( self )
+        
         self._managers[ 'undo' ] = ClientManagers.UndoManager( self )
         self.server_session_manager = HydrusSessions.HydrusSessionManagerServer()
         
@@ -567,13 +568,13 @@ class Controller( object ):
         return write
         
     
-    def ImportURLFromAPI( self, url, service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page ):
+    def ImportURLFromAPI( self, url, filterable_tags, additional_service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page ):
         
         normalised_url = self.network_engine.domain_manager.NormaliseURL( url )
         
         human_result_text = '"{}" URL added successfully.'.format( normalised_url )
         
-        self.Write( 'import_url_test', url, service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page )
+        self.Write( 'import_url_test', url, filterable_tags, additional_service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page )
         
         return ( normalised_url, human_result_text )
         
@@ -699,6 +700,7 @@ class Controller( object ):
             TestServerDB,
             TestClientDBDuplicates,
             TestClientDBTags,
+            TestHydrusNATPunch,
             TestClientNetworking,
             TestHydrusNetworking,
             TestClientImportSubscriptions,
@@ -744,6 +746,10 @@ class Controller( object ):
         
         module_lookup[ 'db_duplicates' ] = [
             TestClientDBDuplicates
+        ]
+        
+        module_lookup[ 'nat' ] = [
+            TestHydrusNATPunch
         ]
         
         module_lookup[ 'networking' ] = [
