@@ -18,7 +18,7 @@ DisableProgramGroupPage=yes
 DisableReadyPage=yes
 DisableDirPage=no
 ShowLanguageDialog=no
-SetupIconFile=dist\client\static\hydrus.ico
+SetupIconFile=hydrus\static\hydrus.ico
 Uninstallable=IsComponentSelected('install')
 UninstallDisplayIcon={app}\static\hydrus.ico
 [Tasks]
