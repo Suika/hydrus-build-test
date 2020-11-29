@@ -138,7 +138,7 @@ jobs:
           dir -r
       - name: InnoSetup
         run: |
-          ISCC.exe "hydrus\docker\InnoSetup.iss"
+          ISCC.exe /DWORKSPACE=${{ env.GITHUB_WORKSPACE }} "hydrus\docker\InnoSetup.iss"
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
