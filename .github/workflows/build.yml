@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-client-sur:
+    if: false
     runs-on: [macos-11.0]
     steps:
       -
@@ -52,6 +53,7 @@ jobs:
           path: dist/client
 
   build-client-catalina:
+    if: false
     runs-on: [macos-latest]
     steps:
       -
