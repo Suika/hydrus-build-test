@@ -1,4 +1,4 @@
-name: buildx
+name: PyInstaller
 on:
   pull_request:
     types: [closed]
@@ -134,6 +134,9 @@ jobs:
           pyinstaller server-win.spec
           pyinstaller client-win.spec
           dir -r
+      - name: InnoSetup
+        run: |
+          ISCC.exe "hydrus\docker\InnoSetup.iss"
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
