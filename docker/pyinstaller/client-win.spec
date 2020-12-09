@@ -47,4 +47,4 @@ coll = COLLECT(exe,
                strip=False,
                upx=False,
                upx_exclude=[],
-               name='client')
+               name='Hydrus Network')

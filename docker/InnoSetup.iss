@@ -7,7 +7,7 @@ Name: {userdesktop}\hydrus client; Filename: {app}\client.exe; WorkingDir: {app}
 Name: {userdesktop}\hydrus server; Filename: {app}\server.exe; WorkingDir: {app}; Tasks: desktopicons
 [Setup]
 InternalCompressLevel=ultra64
-OutputDir=dist\client
+OutputDir=dist
 OutputBaseFilename=Hydrus Network - Windows - Installer
 Compression=lzma/ultra64
 AppName=Hydrus Network
@@ -35,4 +35,4 @@ Name: extract; Description: Extract only
 Filename: {app}\help\index.html; Description: Open help/getting started guide (highly recommended for new users); Flags: postinstall unchecked shellexec
 Filename: {app}\client.exe; Description: Open the client; Flags: postinstall nowait unchecked
 [Files]
-Source: dist\client\* ; DestDir: {app}; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: dist\Hydrus Network\* ; DestDir: {app}; Flags: ignoreversion recursesubdirs createallsubdirs
