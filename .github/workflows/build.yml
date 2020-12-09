@@ -8,8 +8,57 @@ on:
 
 jobs:
   build-ubuntu:
-    if: false
     runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v2
+        with:
+          path: hydrus
+      - 
+        name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v1
+        with:
+          path: Qt
+          key: ${{ runner.os }}-QtCache
+      - 
+        name: Install Qt
+        uses: jurplel/install-qt-action@v2
+        with:
+          install-deps: true
+          setup-python: 'false'
+          modules: qtcharts qtwidgets qtgui qtcore
+          cached: ${{ steps.cache-qt.outputs.cache-hit }}
+      - name: APT Install
+        run: |
+          apt-get update
+          apt-get install -y python3-chardet python3-html5lib python3-bs4 python3-lxml python3-nose python3-numpy python3-opencv python3-six python3-pil python3-psutil python3-openssl python3-yaml python3-requests python3-send2trash python3-service-identity python3-twisted ffmpeg python3-pyside2.qtwidgets python3-pyside2.qtcore python3-pyside2.qtgui python3-pyside2.qtcharts python3-lz4 python3-mock python3-httmock
+      - name: Pip Installer
+        uses: BSFishy/pip-action@v1
+        with:
+          packages: pyinstaller
+          requirements: hydrus/requirements.txt
+      - name: build with pyinstaller
+        run: |
+          cp hydrus/docker/pyinstaller/client.spec client.spec
+          cp hydrus/docker/pyinstaller/server.spec server.spec
+          pyinstaller server.spec
+          pyinstaller client.spec
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Hydrus Ubuntu LTS Extract
+          path: dist/client
+
+  build-macos-sur:
+    if: false
+    runs-on: [macos-11.0]
     steps:
       -
         name: Checkout
@@ -47,48 +96,6 @@ jobs:
           cp hydrus/docker/pyinstaller/server.spec server.spec
           pyinstaller server.spec
           pyinstaller client.spec
-      - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: Hydrus Ubuntu LTS Extract
-          path: dist/client
-
-  build-macos-sur:
-    runs-on: [macos-11.0]
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v2
-        with:
-          path: hydrus
-      - 
-        name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v1
-        with:
-          path: Qt
-          key: ${{ runner.os }}-QtCache
-      - 
-        name: Install Qt
-        uses: jurplel/install-qt-action@v2
-        with:
-          install-deps: true
-          setup-python: 'false'
-          modules: qtcharts qtwidgets qtgui qtcore
-          cached: ${{ steps.cache-qt.outputs.cache-hit }}
-      - name: Pip Installer
-        uses: BSFishy/pip-action@v1
-        with:
-          packages: pyinstaller
-          requirements: hydrus/requirements.txt
-      - name: build with pyinstaller
-        run: |
-          pyinstaller hydrus/client.py
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
