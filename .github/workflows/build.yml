@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-ubuntu:
+    if: false
     runs-on: ubuntu-latest
     steps:
       -
@@ -87,10 +88,7 @@ jobs:
           requirements: hydrus/requirements.txt
       - name: build with pyinstaller
         run: |
-          cp hydrus/docker/pyinstaller/client.spec client.spec
-          cp hydrus/docker/pyinstaller/server.spec server.spec
-          pyinstaller server.spec
-          pyinstaller client.spec
+          pyinstaller hydrus/client.py
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
@@ -98,6 +96,7 @@ jobs:
           path: dist/client
 
   build-macos-catalina:
+    if: false
     runs-on: [macos-latest]
     steps:
       -
@@ -142,7 +141,8 @@ jobs:
           name: Hydrus MacOS Catalina Extract
           path: dist/client
 
-  build-winows:
+  build-windows:
+    if: false
     runs-on: [windows-latest]
     steps:
       -
@@ -198,9 +198,10 @@ jobs:
           path: dist\Hydrus Network - Windows - Installer.exe
 
   check-artifacts:
+    if: false
     name: Check Artifacts
     runs-on: ubuntu-latest
-    needs: [build-winows, build-macos-catalina, build-macos-sur, build-ubuntu]
+    needs: [build-windows, build-macos-catalina, build-macos-sur, build-ubuntu]
     steps:
       - name: Get All Artifacts
         uses: actions/download-artifact@v2
