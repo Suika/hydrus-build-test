@@ -20,7 +20,7 @@ jobs:
         name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.7
+          python-version: 3.8
           architecture: x64
       - name: Cache Qt
         id: cache-qt
@@ -33,6 +33,7 @@ jobs:
         uses: jurplel/install-qt-action@v2
         with:
           install-deps: true
+          setup-python: 'false'
           modules: qtcharts qtwidgets qtgui qtcore
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: Pip Installer
@@ -65,7 +66,7 @@ jobs:
         name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.7
+          python-version: 3.8
           architecture: x64
       - name: Cache Qt
         id: cache-qt
@@ -78,6 +79,7 @@ jobs:
         uses: jurplel/install-qt-action@v2
         with:
           install-deps: true
+          setup-python: 'false'
           modules: qtcharts qtwidgets qtgui qtcore
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: Pip Installer
@@ -109,7 +111,7 @@ jobs:
         name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.7
+          python-version: 3.8
           architecture: x64
       - name: Cache Qt
         id: cache-qt
@@ -122,6 +124,7 @@ jobs:
         uses: jurplel/install-qt-action@v2
         with:
           install-deps: true
+          setup-python: 'false'
           modules: qtcharts qtwidgets qtgui qtcore
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: Pip Installer
