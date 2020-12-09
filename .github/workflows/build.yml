@@ -144,13 +144,12 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: Hydrus Windows Extract
-          path: "dist\Hydrus Network"
+          path: dist\Hydrus Network
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
           name: Hydrus Windows Installer
-          path: "dist\Hydrus Network - Windows - Installer.exe"
-        
+          path: dist\Hydrus Network - Windows - Installer.exe
   create-release:
     if: false
     name: Create Release Entry
