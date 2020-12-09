@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-ubuntu:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       -
         name: Checkout
@@ -21,20 +21,20 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v1
-        with:
-          path: Qt
-          key: ${{ runner.os }}-QtCache
-      - 
-        name: Install Qt
-        uses: jurplel/install-qt-action@v2
-        with:
-          install-deps: true
-          setup-python: 'false'
-          modules: qtcharts qtwidgets qtgui qtcore
-          cached: ${{ steps.cache-qt.outputs.cache-hit }}
+      #- name: Cache Qt
+      #  id: cache-qt
+      #  uses: actions/cache@v1
+      #  with:
+      #    path: Qt
+      #    key: ${{ runner.os }}-QtCache
+      #- 
+      #  name: Install Qt
+      #  uses: jurplel/install-qt-action@v2
+      #  with:
+      #    install-deps: true
+      #    setup-python: 'false'
+      #    modules: qtcharts qtwidgets qtgui qtcore
+      #    cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: APT Install
         run: |
           sudo apt-get update
@@ -218,7 +218,7 @@ jobs:
   create-release:
     if: false
     name: Create Release Entry
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
