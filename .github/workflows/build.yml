@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-ubuntu:
+    if: false
     runs-on: ubuntu-20.04
     steps:
       -
@@ -55,6 +56,41 @@ jobs:
         with:
           name: Hydrus Ubuntu LTS Extract
           path: dist/client
+
+    build-macos:
+    runs-on: [macos-11.0]
+    steps:
+      - uses: actions/checkout@v2
+      - 
+        name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v1.0.1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Rust Cargo
+        uses: actions-rs/cargo@v1.0.1
+        with:
+          command: install
+          args: pyoxidizer
+      - name: Build Hydrus
+        run: |
+          cd $GITHUB_WORKSPACE
+          basename $(rustc --print sysroot) | sed -e "s/^stable-//" > triple.txt
+          pyoxidizer build --release
+          cd build/$(head -n 1 triple.txt)/release/install
+          tar -czf hydrus-macos.tgz *
+          mv *.tgz $GITHUB_WORKSPACE
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2.2.1
+        with:
+          name: Hydrus MacOS Big Sur (Rust) Extract
+          path: hydrus-macos.tgz
+          if-no-files-found: error
 
   build-macos-sur:
     if: false
