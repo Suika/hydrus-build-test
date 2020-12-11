@@ -57,7 +57,7 @@ jobs:
           name: Hydrus Ubuntu LTS Extract
           path: dist/client
 
-    build-macos:
+  build-macos-sur-rust:
     runs-on: [macos-11.0]
     steps:
       - uses: actions/checkout@v2
