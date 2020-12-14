@@ -68,7 +68,7 @@ jobs:
           python-version: 3.8
           architecture: x64
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.0.1
+        uses: Swatinem/rust-cache@v1.1.0
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
