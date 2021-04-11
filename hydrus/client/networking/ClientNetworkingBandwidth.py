@@ -1,14 +1,57 @@
 import collections
 import threading
+import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNetworking
 from hydrus.core import HydrusSerialisable
+from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client.networking import ClientNetworkingContexts
+
+class NetworkBandwidthManagerTrackerContainer( HydrusSerialisable.SerialisableBaseNamed ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_BANDWIDTH_MANAGER_TRACKER_CONTAINER
+    SERIALISABLE_NAME = 'Bandwidth Manager Tracker Container'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, name, network_context = None, bandwidth_tracker = None ):
+        
+        if network_context is None:
+            
+            network_context = ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT
+            
+        
+        if bandwidth_tracker is None:
+            
+            bandwidth_tracker = HydrusNetworking.BandwidthTracker()
+            
+        
+        HydrusSerialisable.SerialisableBaseNamed.__init__( self, name )
+        
+        self.network_context = network_context
+        self.bandwidth_tracker = bandwidth_tracker
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        serialisable_network_context = self.network_context.GetSerialisableTuple()
+        serialisable_bandwidth_tracker = self.bandwidth_tracker.GetSerialisableTuple()
+        
+        return ( serialisable_network_context, serialisable_bandwidth_tracker )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( serialisable_network_context, serialisable_bandwidth_tracker ) = serialisable_info
+        
+        self.network_context = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_network_context )
+        self.bandwidth_tracker = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_bandwidth_tracker )
+        
+    
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_BANDWIDTH_MANAGER_TRACKER_CONTAINER ] = NetworkBandwidthManagerTrackerContainer
 
 class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
     
@@ -30,7 +73,15 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
         self._last_subscriptions_gallery_query_timestamps = collections.defaultdict( lambda: 0 )
         self._last_watchers_query_timestamps = collections.defaultdict( lambda: 0 )
         
-        self._network_contexts_to_bandwidth_trackers = collections.defaultdict( HydrusNetworking.BandwidthTracker )
+        self._tracker_container_names_to_tracker_containers = {}
+        self._network_contexts_to_tracker_containers = {}
+        
+        self._tracker_container_names = set()
+        self._dirty_tracker_container_names = set()
+        self._deletee_tracker_container_names = set()
+        
+        self._my_bandwidth_tracker = HydrusNetworking.BandwidthTracker()
+        
         self._network_contexts_to_bandwidth_rules = collections.defaultdict( HydrusNetworking.BandwidthRules )
         
         for context_type in [ CC.NETWORK_CONTEXT_GLOBAL, CC.NETWORK_CONTEXT_HYDRUS, CC.NETWORK_CONTEXT_DOMAIN, CC.NETWORK_CONTEXT_DOWNLOADER_PAGE, CC.NETWORK_CONTEXT_SUBSCRIPTION, CC.NETWORK_CONTEXT_WATCHER_PAGE ]:
@@ -45,7 +96,7 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
             
             bandwidth_rules = self._GetRules( network_context )
             
-            bandwidth_tracker = self._network_contexts_to_bandwidth_trackers[ network_context ]
+            bandwidth_tracker = self._GetTracker( network_context )
             
             if not bandwidth_rules.CanStartRequest( bandwidth_tracker ):
                 
@@ -68,24 +119,51 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
     
     def _GetSerialisableInfo( self ):
         
-        # note this discards ephemeral network contexts, which have temporary identifiers that are generally invisible to the user
-        all_serialisable_trackers = [ ( network_context.GetSerialisableTuple(), tracker.GetSerialisableTuple() ) for ( network_context, tracker ) in list(self._network_contexts_to_bandwidth_trackers.items()) if not network_context.IsEphemeral() ]
+        all_tracker_container_names = sorted( self._tracker_container_names )
         all_serialisable_rules = [ ( network_context.GetSerialisableTuple(), rules.GetSerialisableTuple() ) for ( network_context, rules ) in list(self._network_contexts_to_bandwidth_rules.items()) ]
         
-        return ( all_serialisable_trackers, all_serialisable_rules )
+        return ( all_tracker_container_names, all_serialisable_rules )
+        
+    
+    def _GetTracker( self, network_context: ClientNetworkingContexts.NetworkContext, making_it_dirty = False ):
+        
+        if network_context not in self._network_contexts_to_tracker_containers:
+            
+            bandwidth_tracker = HydrusNetworking.BandwidthTracker()
+            
+            tracker_container_name = HydrusData.GenerateKey().hex()
+            
+            tracker_container = NetworkBandwidthManagerTrackerContainer( tracker_container_name, network_context = network_context, bandwidth_tracker = bandwidth_tracker )
+            
+            self._tracker_container_names_to_tracker_containers[ tracker_container_name ] = tracker_container
+            self._network_contexts_to_tracker_containers[ network_context ] = tracker_container
+            
+            # note this discards ephemeral network contexts, which have temporary identifiers that are generally invisible to the user
+            
+            if not network_context.IsEphemeral():
+                
+                self._tracker_container_names.add( tracker_container_name )
+                self._dirty_tracker_container_names.add( tracker_container_name )
+                
+            
+            self._SetDirty()
+            
+        
+        tracker_container = self._network_contexts_to_tracker_containers[ network_context ]
+        
+        if making_it_dirty and not network_context.IsEphemeral():
+            
+            self._dirty_tracker_container_names.add( tracker_container.GetName() )
+            
+        
+        return tracker_container.bandwidth_tracker
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
-        ( all_serialisable_trackers, all_serialisable_rules ) = serialisable_info
+        ( all_tracker_container_names, all_serialisable_rules ) = serialisable_info
         
-        for ( serialisable_network_context, serialisable_tracker ) in all_serialisable_trackers:
-            
-            network_context = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_network_context )
-            tracker = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_tracker )
-            
-            self._network_contexts_to_bandwidth_trackers[ network_context ] = tracker
-            
+        self._tracker_container_names = set( all_tracker_container_names )
         
         for ( serialisable_network_context, serialisable_rules ) in all_serialisable_rules:
             
@@ -101,14 +179,28 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def _ReportDataUsed( self, network_contexts, num_bytes ):
+        
+        for network_context in network_contexts:
+            
+            bandwidth_tracker = self._GetTracker( network_context, making_it_dirty = True )
+            
+            bandwidth_tracker.ReportDataUsed( num_bytes )
+            
+        
+        self._my_bandwidth_tracker.ReportDataUsed( num_bytes )
+        
+    
     def _ReportRequestUsed( self, network_contexts ):
         
         for network_context in network_contexts:
             
-            self._network_contexts_to_bandwidth_trackers[ network_context ].ReportRequestUsed()
+            bandwidth_tracker = self._GetTracker( network_context, making_it_dirty = True )
+            
+            bandwidth_tracker.ReportRequestUsed()
             
         
-        self._SetDirty()
+        self._my_bandwidth_tracker.ReportRequestUsed()
         
     
     def _SetDirty( self ):
@@ -162,7 +254,7 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
                 
                 bandwidth_rules = self._GetRules( network_context )
                 
-                bandwidth_tracker = self._network_contexts_to_bandwidth_trackers[ network_context ]
+                bandwidth_tracker = self._GetTracker( network_context )
                 
                 if not bandwidth_rules.CanContinueDownload( bandwidth_tracker ):
                     
@@ -182,7 +274,7 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
                 
                 bandwidth_rules = self._GetRules( network_context )
                 
-                bandwidth_tracker = self._network_contexts_to_bandwidth_trackers[ network_context ]
+                bandwidth_tracker = self._GetTracker( network_context )
                 
                 if not bandwidth_rules.CanDoWork( bandwidth_tracker, expected_requests = expected_requests, expected_bytes = expected_bytes, threshold = threshold ):
                     
@@ -228,19 +320,54 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
             
             for network_context in network_contexts:
                 
-                if network_context in self._network_contexts_to_bandwidth_trackers:
+                if network_context in self._network_contexts_to_tracker_containers:
                     
-                    del self._network_contexts_to_bandwidth_trackers[ network_context ]
+                    tracker_container = self._network_contexts_to_tracker_containers[ network_context ]
                     
-                    if network_context == ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT:
+                    del self._network_contexts_to_tracker_containers[ network_context ]
+                    
+                    tracker_container_name = tracker_container.GetName()
+                    
+                    if tracker_container_name in self._tracker_container_names_to_tracker_containers:
                         
-                        # just to reset it, so we have a 0 global context at all times
-                        self._network_contexts_to_bandwidth_trackers[ ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT ] = HydrusNetworking.BandwidthTracker()
+                        del self._tracker_container_names_to_tracker_containers[ tracker_container_name ]
                         
+                    
+                    self._tracker_container_names.discard( tracker_container_name )
+                    self._dirty_tracker_container_names.discard( tracker_container_name )
+                    self._deletee_tracker_container_names.add( tracker_container_name )
+                    
+                
+                if network_context == ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT:
+                    
+                    # just to reset it and have it in the system, so we have a 0 global context at all times
+                    self._GetTracker( ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT )
                     
                 
             
             self._SetDirty()
+            
+        
+    
+    def GetBandwidthStringsAndGaugeTuples( self, network_context ):
+        
+        with self._lock:
+            
+            bandwidth_rules = self._GetRules( network_context )
+            
+            bandwidth_tracker = self._GetTracker( network_context )
+            
+            return bandwidth_rules.GetBandwidthStringsAndGaugeTuples( bandwidth_tracker )
+            
+        
+    
+    def GetCurrentMonthSummary( self, network_context ):
+        
+        with self._lock:
+            
+            bandwidth_tracker = self._GetTracker( network_context )
+            
+            return bandwidth_tracker.GetCurrentMonthSummary()
             
         
     
@@ -262,25 +389,27 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def GetCurrentMonthSummary( self, network_context ):
+    def GetDeleteeTrackerNames( self ):
         
         with self._lock:
             
-            bandwidth_tracker = self._network_contexts_to_bandwidth_trackers[ network_context ]
-            
-            return bandwidth_tracker.GetCurrentMonthSummary()
+            return set( self._deletee_tracker_container_names )
             
         
     
-    def GetBandwidthStringsAndGaugeTuples( self, network_context ):
+    def GetDirtyTrackerContainers( self ):
         
         with self._lock:
             
-            bandwidth_rules = self._GetRules( network_context )
+            return [ self._tracker_container_names_to_tracker_containers[ tracker_container_name ] for tracker_container_name in self._dirty_tracker_container_names ]
             
-            bandwidth_tracker = self._network_contexts_to_bandwidth_trackers[ network_context ]
+        
+    
+    def GetMySessionTracker( self ):
+        
+        with self._lock:
             
-            return bandwidth_rules.GetBandwidthStringsAndGaugeTuples( bandwidth_tracker )
+            return self._my_bandwidth_tracker
             
         
     
@@ -290,12 +419,16 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
             
             result = set()
             
-            for ( network_context, bandwidth_tracker ) in list(self._network_contexts_to_bandwidth_trackers.items()):
+            for tracker_container in self._network_contexts_to_tracker_containers.values():
+                
+                network_context = tracker_container.network_context
                 
                 if network_context.IsDefault() or network_context.IsEphemeral():
                     
                     continue
                     
+                
+                bandwidth_tracker = tracker_container.bandwidth_tracker
                 
                 if network_context != ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT and history_time_delta_threshold is not None:
                     
@@ -324,9 +457,9 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            if network_context in self._network_contexts_to_bandwidth_trackers:
+            if network_context in self._network_contexts_to_tracker_containers:
                 
-                return self._network_contexts_to_bandwidth_trackers[ network_context ]
+                return self._GetTracker( network_context )
                 
             else:
                 
@@ -345,7 +478,7 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
                 
                 bandwidth_rules = self._GetRules( network_context )
                 
-                bandwidth_tracker = self._network_contexts_to_bandwidth_trackers[ network_context ]
+                bandwidth_tracker = self._GetTracker( network_context )
                 
                 estimates.append( ( bandwidth_rules.GetWaitingEstimate( bandwidth_tracker ), network_context ) )
                 
@@ -360,6 +493,14 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
                 
                 return estimates[0]
                 
+            
+        
+    
+    def HasDirtyTrackerContainers( self ):
+        
+        with self._lock:
+            
+            return len( self._dirty_tracker_container_names ) > 0 or len( self._deletee_tracker_container_names ) > 0
             
         
     
@@ -383,12 +524,7 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            for network_context in network_contexts:
-                
-                self._network_contexts_to_bandwidth_trackers[ network_context ].ReportDataUsed( num_bytes )
-                
-            
-            self._SetDirty()
+            self._ReportDataUsed( network_contexts, num_bytes )
             
         
     
@@ -405,6 +541,16 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             self._dirty = False
+            self._dirty_tracker_container_names = set()
+            self._deletee_tracker_container_names = set()
+            
+        
+    
+    def SetDirty( self ):
+        
+        with self._lock:
+            
+            self._SetDirty()
             
         
     
@@ -412,7 +558,7 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            if len( bandwidth_rules.GetRules() ) == 0:
+            if len( bandwidth_rules.GetRules() ) == 0 and not network_context.IsDefault():
                 
                 if network_context in self._network_contexts_to_bandwidth_rules:
                     
@@ -425,6 +571,38 @@ class NetworkBandwidthManager( HydrusSerialisable.SerialisableBase ):
                 
             
             self._SetDirty()
+            
+        
+    
+    def SetTrackerContainers( self, tracker_containers: typing.Collection[ NetworkBandwidthManagerTrackerContainer ], set_all_trackers_dirty = False ):
+        
+        with self._lock:
+            
+            self._tracker_container_names_to_tracker_containers = {}
+            self._network_contexts_to_tracker_containers = {}
+            
+            self._tracker_container_names = set()
+            self._dirty_tracker_container_names = set()
+            self._deletee_tracker_container_names = set()
+            
+            for tracker_container in tracker_containers:
+                
+                tracker_container_name = tracker_container.GetName()
+                network_context = tracker_container.network_context
+                
+                self._tracker_container_names_to_tracker_containers[ tracker_container_name ] = tracker_container
+                self._network_contexts_to_tracker_containers[ network_context ] = tracker_container
+                
+                if not network_context.IsEphemeral():
+                    
+                    self._tracker_container_names.add( tracker_container_name )
+                    
+                    if set_all_trackers_dirty:
+                        
+                        self._dirty_tracker_container_names.add( tracker_container_name )
+                        
+                    
+                
             
         
     

@@ -1,3 +1,4 @@
+import collections
 import typing
 
 from qtpy import QtCore as QC
@@ -18,7 +19,6 @@ from hydrus.client import ClientData
 from hydrus.client import ClientDuplicates
 from hydrus.client import ClientPaths
 from hydrus.client.gui import ClientGUICanvasMedia
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsManage
@@ -39,6 +39,8 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.media import ClientMedia
 from hydrus.client.metadata import ClientRatings
 from hydrus.client.metadata import ClientTags
+from hydrus.client.metadata import ClientTagSorting
+from hydrus.client.gui.widgets import ClientGUICommon
 
 ZOOM_CENTERPOINT_MEDIA_CENTER = 0
 ZOOM_CENTERPOINT_VIEWER_CENTER = 1
@@ -372,7 +374,7 @@ class Canvas( QW.QWidget ):
         # once we have catch_mouse full shortcut support for canvases, swap out this out for an option to swallow activating clicks
         ignore_activating_mouse_click = catch_mouse and not self.PREVIEW_WINDOW
         
-        self._my_shortcuts_handler = ClientGUIShortcuts.ShortcutsHandler( self, initial_shortcuts_names = ( 'media', 'media_viewer' ), catch_mouse = catch_mouse, ignore_activating_mouse_click = ignore_activating_mouse_click )
+        self._my_shortcuts_handler = ClientGUIShortcuts.ShortcutsHandler( self, [ 'media', 'media_viewer' ], catch_mouse = catch_mouse, ignore_activating_mouse_click = ignore_activating_mouse_click )
         
         self._click_drag_reporting_filter = MediaContainerDragClickReportingFilter( self )
         
@@ -1115,6 +1117,11 @@ class Canvas( QW.QWidget ):
         
     
     def _Undelete( self ):
+        
+        if self._current_media is None:
+            
+            return
+            
         
         locations_manager = self._current_media.GetLocationsManager()
         
@@ -1972,12 +1979,12 @@ class CanvasWithDetails( Canvas ):
             
             text = self._GetNoMediaText()
             
-            text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, text )
+            ( text_size, text ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, text )
             
             x = ( my_width - text_size.width() ) // 2
             y = ( my_height - text_size.height() ) // 2
             
-            QP.DrawText( painter, x, y, text )
+            ClientGUIFunctions.DrawText( painter, x, y, text )
             
         else:
             
@@ -1999,7 +2006,9 @@ class CanvasWithDetails( Canvas ):
             
             tags_i_want_to_display = list( tags_i_want_to_display )
             
-            ClientTags.SortTags( HC.options[ 'default_tag_sort' ], tags_i_want_to_display )
+            tag_sort = HG.client_controller.new_options.GetDefaultTagSort()
+            
+            ClientTagSorting.SortTags( tag_sort, tags_i_want_to_display )
             
             current_y = 3
             
@@ -2032,9 +2041,9 @@ class CanvasWithDetails( Canvas ):
                 
                 painter.setPen( QG.QPen( QG.QColor( r, g, b ) ) )
                 
-                text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, display_string )
+                ( text_size, display_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, display_string )
                 
-                QP.DrawText( painter, 5, current_y, display_string )
+                ClientGUIFunctions.DrawText( painter, 5, current_y, display_string )
                 
                 current_y += text_size.height()
                 
@@ -2125,9 +2134,9 @@ class CanvasWithDetails( Canvas ):
             
             for remote_string in remote_strings:
                 
-                text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, remote_string )
+                ( text_size, remote_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, remote_string )
                 
-                QP.DrawText( painter, my_width - text_size.width() - 3, current_y, remote_string )
+                ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, current_y, remote_string )
                 
                 current_y += text_size.height()
                 
@@ -2140,9 +2149,9 @@ class CanvasWithDetails( Canvas ):
             
             for ( display_string, url ) in url_tuples:
                 
-                text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, display_string )
+                ( text_size, display_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, display_string )
                 
-                QP.DrawText( painter, my_width - text_size.width() - 3, current_y, display_string )
+                ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, current_y, display_string )
                 
                 current_y += text_size.height() + 2
                 
@@ -2155,18 +2164,18 @@ class CanvasWithDetails( Canvas ):
             
             if len( title_string ) > 0:
                 
-                text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, title_string )
+                ( text_size, title_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, title_string )
                 
-                QP.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, title_string )
+                ClientGUIFunctions.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, title_string )
                 
                 current_y += text_size.height() + 3
                 
             
             info_string = self._GetInfoString()
             
-            text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, info_string )
+            ( text_size, info_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, info_string )
             
-            QP.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, info_string )
+            ClientGUIFunctions.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, info_string )
             
             current_y += text_size.height() + 3
             
@@ -2178,9 +2187,9 @@ class CanvasWithDetails( Canvas ):
             
             if len( index_string ) > 0:
                 
-                text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, index_string )
+                ( text_size, index_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, index_string )
                 
-                QP.DrawText( painter, my_width - text_size.width() - 3, my_height - text_size.height() - 3, index_string )
+                ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, my_height - text_size.height() - 3, index_string )
                 
             
         
@@ -2706,14 +2715,14 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             text = 'Loading pairs\u2026'
             
-            text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, text )
+            ( text_size, text ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, text )
             
             my_size = self.size()
             
             x = ( my_size.width() - text_size.width() ) // 2
             y = ( my_size.height() - text_size.height() ) // 2
             
-            QP.DrawText( painter, x, y, text )
+            ClientGUIFunctions.DrawText( painter, x, y, text )
             
         else:
             
@@ -2951,6 +2960,8 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                     
                     if len( self._processed_pairs ) == 0:
                         
+                        HG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
+                        
                         QW.QMessageBox.critical( self, 'Error', 'Due to an unexpected series of events (likely a series of file deletes), the duplicate filter has no valid pair to back up to. It will now close.' )
                         
                         self.window().deleteLater()
@@ -3027,6 +3038,8 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                     
                     if len( self._processed_pairs ) == 0:
                         
+                        HG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
+                        
                         QW.QMessageBox.critical( self, 'Error', 'It seems an entire batch of pairs were unable to be displayed. The duplicate filter will now close.' )
                         
                         self.window().deleteLater()
@@ -3053,6 +3066,8 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 QW.QMessageBox.warning( self, 'Warning', 'At least one of the potential files in this pair was not in this client. Likely it was very recently deleted through a different process. Your decisions until now will be saved, and then the duplicate filter will close.' )
                 
                 self._CommitProcessed( blocking = True )
+                
+                HG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
                 
                 self._TryToCloseWindow()
                 
@@ -3130,7 +3145,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     
     def CleanBeforeDestroy( self ):
         
-        HG.client_controller.pub( 'refresh_dupe_page_numbers' )
+        HG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
         
         ClientMedia.hashes_to_jpeg_quality = {} # clear the cache
         ClientMedia.hashes_to_pixel_hashes = {} # clear the cache
@@ -3637,29 +3652,29 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
                 
             elif result == QW.QDialog.Accepted:
                 
-                def process_in_thread( service_keys_and_content_updates ):
-                    
-                    for ( service_key, content_update ) in service_keys_and_content_updates:
-                        
-                        HG.client_controller.WriteSynchronous( 'content_updates', { service_key : [ content_update ] } )
-                        
-                    
-                
                 self._deleted_hashes = [ media.GetHash() for media in self._deleted ]
                 self._kept_hashes = [ media.GetHash() for media in self._kept ]
                 
-                service_keys_and_content_updates = []
+                service_keys_to_content_updates = {}
                 
-                reason = 'Deleted in Archive/Delete filter.'
-                
-                for chunk_of_hashes in HydrusData.SplitListIntoChunks( self._deleted_hashes, 64 ):
+                if len( self._deleted_hashes ) > 0:
                     
-                    service_keys_and_content_updates.append( ( CC.LOCAL_FILE_SERVICE_KEY, HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes, reason = reason ) ) )
+                    reason = 'Deleted in Archive/Delete filter.'
+                    
+                    service_keys_to_content_updates[ CC.LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, self._deleted_hashes, reason = reason ) ]
                     
                 
-                service_keys_and_content_updates.append( ( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, self._kept_hashes ) ) )
+                if len( self._kept_hashes ) > 0:
+                    
+                    service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, self._kept_hashes ) ]
+                    
                 
-                HG.client_controller.CallToThread( process_in_thread, service_keys_and_content_updates )
+                # do this in one go to ensure if the user hits F5 real quick, they won't see the files again
+                
+                if len( service_keys_to_content_updates ) > 0:
+                    
+                    HG.client_controller.Write( 'content_updates', service_keys_to_content_updates )
+                    
                 
                 self._kept = set()
                 self._deleted = set()
@@ -4143,7 +4158,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
             new_options = HG.client_controller.new_options
             
             advanced_mode = new_options.GetBoolean( 'advanced_mode' )
-        
+            
             services = HG.client_controller.services_manager.GetServices()
             
             local_ratings_services = [ service for service in services if service.GetServiceType() in ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ) ]

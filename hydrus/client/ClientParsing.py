@@ -2,6 +2,7 @@ import base64
 import bs4
 import calendar
 import collections
+import html
 import json
 import os
 import re
@@ -80,7 +81,20 @@ def ConvertParseResultToPrettyString( result ):
         
     elif content_type == HC.CONTENT_TYPE_HASH:
         
-        return additional_info + ' hash: ' + parsed_text.hex()
+        ( hash_type, hash_encoding ) = additional_info
+        
+        try:
+            
+            hash = GetHashFromParsedText( hash_encoding, parsed_text )
+            
+            parsed_text = hash.hex()
+            
+        except Exception as e:
+            
+            parsed_text = 'Could not decode a hash from {}: {}'.format( parsed_text, str( e ) )
+            
+        
+        return '{} hash: {}'.format( hash_type, parsed_text )
         
     elif content_type == HC.CONTENT_TYPE_TIMESTAMP:
         
@@ -123,87 +137,85 @@ def ConvertParseResultToPrettyString( result ):
     
 def ConvertParsableContentToPrettyString( parsable_content, include_veto = False ):
     
-    pretty_strings = []
-    
-    content_type_to_additional_infos = HydrusData.BuildKeyToSetDict( ( ( ( content_type, name ), additional_infos ) for ( name, content_type, additional_infos ) in parsable_content ) )
-    
-    data = list( content_type_to_additional_infos.items() )
-    
-    for ( ( content_type, name ), additional_infos ) in data:
+    try:
         
-        if content_type == HC.CONTENT_TYPE_URLS:
+        pretty_strings = []
+        
+        content_type_to_additional_infos = HydrusData.BuildKeyToSetDict( ( ( ( content_type, name ), additional_infos ) for ( name, content_type, additional_infos ) in parsable_content ) )
+        
+        data = list( content_type_to_additional_infos.items() )
+        
+        for ( ( content_type, name ), additional_infos ) in data:
             
-            for ( url_type, priority ) in additional_infos:
+            if content_type == HC.CONTENT_TYPE_URLS:
                 
-                if url_type == HC.URL_TYPE_DESIRED:
+                for ( url_type, priority ) in additional_infos:
                     
-                    pretty_strings.append( 'downloadable/pursuable url' )
-                    
-                elif url_type == HC.URL_TYPE_SOURCE:
-                    
-                    pretty_strings.append( 'associable/source url' )
-                    
-                elif url_type == HC.URL_TYPE_NEXT:
-                    
-                    pretty_strings.append( 'gallery next page url' )
-                    
-                elif url_type == HC.URL_TYPE_SUB_GALLERY:
-                    
-                    pretty_strings.append( 'sub-gallery url' )
-                    
-                
-            
-        elif content_type == HC.CONTENT_TYPE_MAPPINGS:
-            
-            namespaces = [ namespace for namespace in additional_infos if namespace != '' ]
-            
-            if '' in additional_infos:
-                
-                namespaces.append( 'unnamespaced' )
-                
-            
-            pretty_strings.append( 'tags: ' + ', '.join( namespaces ) )
-            
-        elif content_type == HC.CONTENT_TYPE_HASH:
-            
-            if len( additional_infos ) == 1:
-                
-                ( hash_type, ) = additional_infos
-                
-                pretty_strings.append( 'hash: ' + hash_type )
-                
-            else:
-                
-                hash_types = sorted( additional_infos )
-                
-                pretty_strings.append( 'hashes: ' + ', '.join( hash_types ) )
-                
-            
-        elif content_type == HC.CONTENT_TYPE_TIMESTAMP:
-            
-            for timestamp_type in additional_infos:
-                
-                if timestamp_type == HC.TIMESTAMP_TYPE_SOURCE:
-                    
-                    pretty_strings.append( 'source time' )
+                    if url_type == HC.URL_TYPE_DESIRED:
+                        
+                        pretty_strings.append( 'downloadable/pursuable url' )
+                        
+                    elif url_type == HC.URL_TYPE_SOURCE:
+                        
+                        pretty_strings.append( 'associable/source url' )
+                        
+                    elif url_type == HC.URL_TYPE_NEXT:
+                        
+                        pretty_strings.append( 'gallery next page url' )
+                        
+                    elif url_type == HC.URL_TYPE_SUB_GALLERY:
+                        
+                        pretty_strings.append( 'sub-gallery url' )
+                        
                     
                 
-            
-        elif content_type == HC.CONTENT_TYPE_TITLE:
-            
-            pretty_strings.append( 'watcher page title' )
-            
-        elif content_type == HC.CONTENT_TYPE_VETO:
-            
-            if include_veto:
+            elif content_type == HC.CONTENT_TYPE_MAPPINGS:
                 
-                pretty_strings.append( 'veto: ' + name )
+                namespaces = [ namespace for namespace in additional_infos if namespace != '' ]
+                
+                if '' in additional_infos:
+                    
+                    namespaces.append( 'unnamespaced' )
+                    
+                
+                pretty_strings.append( 'tags: ' + ', '.join( namespaces ) )
+                
+            elif content_type == HC.CONTENT_TYPE_HASH:
+                
+                s = 'hash: {}'.format( ', '.join( ( '{} in {}'.format( hash_type, hash_encoding ) for ( hash_type, hash_encoding ) in additional_infos ) ) )
+                
+                pretty_strings.append( s )
+                
+            elif content_type == HC.CONTENT_TYPE_TIMESTAMP:
+                
+                for timestamp_type in additional_infos:
+                    
+                    if timestamp_type == HC.TIMESTAMP_TYPE_SOURCE:
+                        
+                        pretty_strings.append( 'source time' )
+                        
+                    
+                
+            elif content_type == HC.CONTENT_TYPE_TITLE:
+                
+                pretty_strings.append( 'watcher page title' )
+                
+            elif content_type == HC.CONTENT_TYPE_VETO:
+                
+                if include_veto:
+                    
+                    pretty_strings.append( 'veto: ' + name )
+                    
+                
+            elif content_type == HC.CONTENT_TYPE_VARIABLE:
+                
+                pretty_strings.append( 'temp variables: ' + ', '.join( additional_infos ) )
                 
             
-        elif content_type == HC.CONTENT_TYPE_VARIABLE:
-            
-            pretty_strings.append( 'temp variables: ' + ', '.join( additional_infos ) )
-            
+        
+    except:
+        
+        return 'COULD NOT RENDER--probably a broken object!'
         
     
     pretty_strings.sort()
@@ -244,15 +256,67 @@ def GetChildrenContent( job_key, children, parsing_text, referral_url ):
     
     return content
     
+def GetHashFromParsedText( hash_encoding, parsed_text ) -> bytes:
+    
+    encodings_to_attempt = []
+    
+    if hash_encoding == 'hex':
+        
+        encodings_to_attempt = [ 'hex', 'base64' ]
+        
+    elif hash_encoding == 'base64':
+        
+        encodings_to_attempt = [ 'base64' ]
+        
+    
+    main_error_text = None
+    
+    for encoding_to_attempt in encodings_to_attempt:
+        
+        try:
+            
+            if encoding_to_attempt == 'hex':
+                
+                return bytes.fromhex( parsed_text )
+                
+            elif encoding_to_attempt == 'base64':
+                
+                return base64.b64decode( parsed_text )
+                
+            
+        except Exception as e:
+            
+            if main_error_text is None:
+                
+                main_error_text = str( e )
+                
+            
+            continue
+            
+        
+    
+    raise Exception( 'Could not decode hash: {}'.format( main_error_text ) )
+    
 def GetHashesFromParseResults( results ):
     
     hash_results = []
     
-    for ( ( name, content_type, additional_info ), parsed_bytes ) in results:
+    for ( ( name, content_type, additional_info ), parsed_text ) in results:
         
         if content_type == HC.CONTENT_TYPE_HASH:
             
-            hash_results.append( ( additional_info, parsed_bytes ) )
+            ( hash_type, hash_encoding ) = additional_info
+            
+            try:
+                
+                hash = GetHashFromParsedText( hash_encoding, parsed_text )
+                
+            except:
+                
+                continue
+                
+            
+            hash_results.append( ( hash_type, hash ) )
             
         
     
@@ -557,23 +621,9 @@ class ParseFormula( HydrusSerialisable.SerialisableBase ):
         
         raw_texts = self._ParseRawTexts( parsing_context, parsing_text )
         
-        texts = []
+        raw_texts = [ HydrusText.RemoveNewlines( raw_text ) for raw_text in raw_texts ]
         
-        for raw_text in raw_texts:
-            
-            raw_text = HydrusText.RemoveNewlines( raw_text )
-            
-            try:
-                
-                processed_texts = self._string_processor.ProcessStrings( [ raw_text ] )
-                
-                texts.extend( processed_texts )
-                
-            except HydrusExceptions.ParseException:
-                
-                continue
-                
-            
+        texts = self._string_processor.ProcessStrings( raw_texts )
         
         return texts
         
@@ -1609,7 +1659,7 @@ class ParseFormulaJSON( ParseFormula ):
                 
             elif self._content_to_fetch == JSON_CONTENT_JSON:
                 
-                raw_text = json.dumps( root )
+                raw_text = json.dumps( root, ensure_ascii = False )
                 
                 raw_texts.append( raw_text )
                 
@@ -1820,9 +1870,9 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_CONTENT_PARSER
     SERIALISABLE_NAME = 'Content Parser'
-    SERIALISABLE_VERSION = 4
+    SERIALISABLE_VERSION = 6
     
-    def __init__( self, name = None, content_type = None, formula = None, sort_type = CONTENT_PARSER_SORT_TYPE_NONE, sort_asc = False, additional_info = None ):
+    def __init__( self, name = None, content_type = None, formula = None, additional_info = None ):
         
         if name is None:
             
@@ -1850,8 +1900,6 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
         self._name = name
         self._content_type = content_type
         self._formula = formula
-        self._sort_type = sort_type
-        self._sort_asc = sort_asc
         self._additional_info = additional_info
         
     
@@ -1870,12 +1918,12 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
             serialisable_additional_info = self._additional_info
             
         
-        return ( self._name, self._content_type, serialisable_formula, self._sort_type, self._sort_asc, serialisable_additional_info )
+        return ( self._name, self._content_type, serialisable_formula, serialisable_additional_info )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
-        ( self._name, self._content_type, serialisable_formula, self._sort_type, self._sort_asc, serialisable_additional_info ) = serialisable_info
+        ( self._name, self._content_type, serialisable_formula, serialisable_additional_info ) = serialisable_info
         
         if self._content_type == HC.CONTENT_TYPE_VETO:
             
@@ -1891,7 +1939,22 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
             
             if isinstance( self._additional_info, list ):
                 
-                self._additional_info = tuple( self._additional_info )
+                additional_info = []
+                
+                for item in self._additional_info:
+                    
+                    # this fixes some garbage accidental update caused by borked version numbers that made ( [ 'md5', 'hex' ], 'hex' )
+                    if isinstance( item, list ):
+                        
+                        additional_info = tuple( item )
+                        
+                        break
+                        
+                    
+                    additional_info.append( item )
+                    
+                
+                self._additional_info = tuple( additional_info )
                 
             
         
@@ -1968,6 +2031,53 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
             return ( 4, new_serialisable_info )
             
         
+        if version == 4:
+            
+            ( name, content_type, serialisable_formula, sort_type, sort_asc, additional_info ) = old_serialisable_info
+            
+            if content_type == HC.CONTENT_TYPE_HASH and not isinstance( additional_info, list ):
+                
+                hash_encoding = 'hex'
+                
+                if '"base64"' in json.dumps( serialisable_formula ): # lmao, top code
+                    
+                    hash_encoding = 'base64'
+                    
+                
+                hash_type = additional_info
+                
+                additional_info = ( hash_type, hash_encoding )
+                
+            
+            new_serialisable_info = ( name, content_type, serialisable_formula, sort_type, sort_asc, additional_info )
+            
+            return ( 5, new_serialisable_info )
+            
+        
+        if version == 5:
+            
+            ( name, content_type, serialisable_formula, sort_type, sort_asc, additional_info ) = old_serialisable_info
+            
+            if sort_type != CONTENT_PARSER_SORT_TYPE_NONE:
+                
+                formula = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_formula )
+                
+                string_processor = formula.GetStringProcessor()
+                
+                processing_steps = string_processor.GetProcessingSteps()
+                
+                processing_steps.append( StringSorter( sort_type = sort_type, asc = sort_asc ) )
+                
+                string_processor.SetProcessingSteps( processing_steps )
+                
+                serialisable_formula = formula.GetSerialisableTuple()
+                
+            
+            new_serialisable_info = ( name, content_type, serialisable_formula, additional_info )
+            
+            return ( 6, new_serialisable_info )
+            
+        
     
     def GetName( self ):
         
@@ -1992,32 +2102,6 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
             e = HydrusExceptions.ParseException( prefix + str( e ) )
             
             raise e
-            
-        
-        # let's just make sure the user did their decoding-from-hex right
-        if self._content_type == HC.CONTENT_TYPE_HASH:
-            
-            we_want = bytes
-            
-        else:
-            
-            we_want = str
-            
-        
-        parsed_texts = [ parsed_text for parsed_text in parsed_texts if isinstance( parsed_text, we_want ) ]
-        
-        if self._sort_type == CONTENT_PARSER_SORT_TYPE_LEXICOGRAPHIC:
-            
-            parsed_texts.sort( reverse = not self._sort_asc )
-            
-        elif self._sort_type == CONTENT_PARSER_SORT_TYPE_HUMAN_SORT:
-            
-            HydrusData.HumanTextSort( parsed_texts )
-            
-            if not self._sort_asc:
-                
-                parsed_texts.reverse()
-                
             
         
         if self._content_type == HC.CONTENT_TYPE_URLS:
@@ -2135,7 +2219,7 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
     
     def ToTuple( self ):
         
-        return ( self._name, self._content_type, self._formula, self._sort_type, self._sort_asc, self._additional_info )
+        return ( self._name, self._content_type, self._formula, self._additional_info )
         
     
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_CONTENT_PARSER ] = ContentParser
@@ -3133,23 +3217,37 @@ class StringConverter( StringProcessingStep ):
                         
                         s = urllib.parse.quote( s, safe = '' )
                         
+                    elif encode_type == 'unicode escape characters':
+                        
+                        s = s.encode( 'unicode-escape' ).decode( 'utf-8' )
+                        
+                    elif encode_type == 'html entities':
+                        
+                        s = html.escape( s )
+                        
                     else:
                         
                         # due to py3, this is now a bit of a pain
-                        # _for now_, let's convert to bytes and then spit out a str
+                        # _for now_, let's convert to bytes if not already and then spit out a str
                         
                         if isinstance( s, str ):
                             
-                            s = bytes( s, 'utf-8' )
+                            s_bytes = bytes( s, 'utf-8' )
+                            
+                        else:
+                            
+                            s_bytes = s
                             
                         
                         if encode_type == 'hex':
                             
-                            s = s.hex()
+                            s = s_bytes.hex()
                             
                         elif encode_type == 'base64':
                             
-                            s = str( base64.b64encode( s ), 'utf-8' )
+                            s_bytes = base64.b64encode( s_bytes )
+                            
+                            s = str( s_bytes, 'utf-8' )
                             
                         
                     
@@ -3161,21 +3259,16 @@ class StringConverter( StringProcessingStep ):
                         
                         s = urllib.parse.unquote( s )
                         
-                    else:
+                    elif encode_type == 'unicode escape characters':
                         
-                        # due to py3, this is now a bit of a pain
-                        # as this is mostly used for hash stuff, _for now_, let's spit out a **bytes**
-                        # the higher up object will have responsibility for coercing to str if needed
+                        s = s.encode( 'utf-8' ).decode( 'unicode-escape' )
                         
-                        if encode_type == 'hex':
-                            
-                            s = bytes.fromhex( s )
-                            
-                        elif encode_type == 'base64':
-                            
-                            s = base64.b64decode( s )
-                            
+                    elif encode_type == 'html entities':
                         
+                        s = html.unescape( s )
+                        
+                    
+                    # the old 'hex' and 'base64' are now deprecated, no-ops
                     
                 elif conversion_type == STRING_CONVERSION_REVERSE:
                     
@@ -3338,6 +3431,11 @@ class StringConverter( StringProcessingStep ):
             return 'encode to ' + data
             
         elif conversion_type == STRING_CONVERSION_DECODE:
+            
+            if data in ( 'hex', 'base64' ):
+                
+                return 'deprecated {} decode, now a no-op, can be deleted'.format( data )
+                
             
             return 'decode from ' + data
             
@@ -3612,6 +3710,298 @@ class StringMatch( StringProcessingStep ):
     
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_STRING_MATCH ] = StringMatch
 
+class StringSlicer( StringProcessingStep ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_STRING_SLICER
+    SERIALISABLE_NAME = 'String Selector/Slicer'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, index_start: typing.Optional[ int ] = None, index_end: typing.Optional[ int ] = None ):
+        
+        StringProcessingStep.__init__( self )
+        
+        self._index_start = index_start
+        self._index_end = index_end
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        return ( self._index_start, self._index_end )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( self._index_start, self._index_end ) = serialisable_info
+        
+    
+    def GetIndexStartEnd( self ) -> typing.Tuple[ typing.Optional[ int ], typing.Optional[ int ] ]:
+        
+        return ( self._index_start, self._index_end )
+        
+    
+    def MakesChanges( self ) -> bool:
+        
+        return self._index_start is not None or self._index_end is not None
+        
+    
+    def SelectsNothingEver( self ) -> bool:
+        
+        if self._index_end == 0:
+            
+            return True
+            
+        
+        if self._index_start is None or self._index_end is None:
+            
+            return False
+            
+        
+        both_positive = self._index_start >= 0 and self._index_end >= 0
+        both_negative = self._index_start < 0 and self._index_end < 0
+        
+        if both_positive or both_negative:
+            
+            if self._index_start >= self._index_end:
+                
+                return True
+                
+            
+        
+        return False
+        
+    
+    def SelectsOne( self ) -> bool:
+        
+        if self.SelectsNothingEver():
+            
+            return False
+            
+        
+        if self._index_start == -1 and self._index_end is None:
+            
+            return True
+            
+        
+        if self._index_start is None or self._index_end is None:
+            
+            return False
+            
+        
+        both_positive = self._index_start >= 0 and self._index_end >= 0
+        both_negative = self._index_start < 0 and self._index_end < 0
+        
+        return ( both_positive or both_negative ) and self._index_start == self._index_end - 1
+        
+    
+    def Slice( self, texts: typing.Sequence[ str ] ) -> typing.List[ str ]:
+        
+        try:
+            
+            if self._index_start is None and self._index_end is None:
+                
+                return list( texts )
+                
+            elif self._index_end is None:
+                
+                return texts[ self._index_start : ]
+                
+            elif self._index_start is None:
+                
+                return texts[ : self._index_end ]
+                
+            else:
+                
+                return texts[ self._index_start : self._index_end ]
+                
+            
+        except IndexError as e:
+            
+            return []
+            
+        
+    
+    def ToString( self, simple = False, with_type = False ) -> str:
+        
+        if simple:
+            
+            return 'selector/slicer'
+            
+        
+        if self.SelectsNothingEver():
+            
+            result = 'selecting nothing'
+            
+        elif self.SelectsOne():
+            
+            result = 'selecting the {} string'.format( HydrusData.ConvertIndexToPrettyOrdinalString( self._index_start ) )
+            
+        elif self._index_start is None and self._index_end is None:
+            
+            result = 'selecting everything'
+            
+        elif self._index_end is None:
+            
+            result = 'selecting the {} string and onwards'.format( HydrusData.ConvertIndexToPrettyOrdinalString( self._index_start ) )
+            
+        elif self._index_start is None:
+            
+            result = 'selecting up to and including the {} string'.format( HydrusData.ConvertIndexToPrettyOrdinalString( self._index_end - 1 ) )
+            
+        else:
+            
+            result = 'selecting the {} string up to and including the {} string'.format( HydrusData.ConvertIndexToPrettyOrdinalString( self._index_start ), HydrusData.ConvertIndexToPrettyOrdinalString( self._index_end - 1 ) )
+            
+        
+        if with_type:
+            
+            if self.SelectsOne():
+                
+                result = 'SELECT: {}'.format( result )
+                
+            else:
+                
+                result = 'SLICE: {}'.format( result )
+                
+            
+        
+        return result
+        
+    
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_STRING_SLICER ] = StringSlicer
+
+sort_str_enum = {
+    CONTENT_PARSER_SORT_TYPE_NONE : 'no sorting',
+    CONTENT_PARSER_SORT_TYPE_LEXICOGRAPHIC : 'strict lexicographic',
+    CONTENT_PARSER_SORT_TYPE_HUMAN_SORT : 'human sort'
+}
+
+class StringSorter( StringProcessingStep ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_STRING_SORTER
+    SERIALISABLE_NAME = 'String Sorter'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, sort_type: int = CONTENT_PARSER_SORT_TYPE_HUMAN_SORT, asc: bool = False, regex: typing.Optional[ str ] = None ):
+        
+        StringProcessingStep.__init__( self )
+        
+        self._sort_type = sort_type
+        self._asc = asc
+        self._regex = regex
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        return ( self._sort_type, self._asc, self._regex )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( self._sort_type, self._asc, self._regex ) = serialisable_info
+        
+    
+    def GetAscending( self ) -> bool:
+        
+        return self._asc
+        
+    
+    def GetRegex( self ) -> typing.Optional[ str ]:
+        
+        return self._regex
+        
+    
+    def GetSortType( self ) -> int:
+        
+        return self._sort_type
+        
+    
+    def MakesChanges( self ) -> bool:
+        
+        return True
+        
+    
+    def Sort( self, texts: typing.Sequence[ str ] ) -> typing.List[ str ]:
+        
+        try:
+            
+            texts = list( texts )
+            
+            data_convert = lambda d_s: d_s
+            invalid_data_convert_texts = []
+            
+            if self._regex is not None:
+                
+                re_job = re.compile( self._regex )
+                
+                def d( d_s ):
+                    
+                    m = re_job.search( d_s )
+                    
+                    if m is None:
+                        
+                        return ''
+                        
+                    else:
+                        
+                        return m.group()
+                        
+                    
+                
+                data_convert = d
+                
+                invalid_data_convert_texts = [ text for text in texts if data_convert( text ) == '' ]
+                texts = [ text for text in texts if data_convert( text ) != '' ]
+                
+            
+            sort_convert = lambda s: s
+            
+            if self._sort_type == CONTENT_PARSER_SORT_TYPE_HUMAN_SORT:
+                
+                sort_convert = HydrusData.HumanTextSortKey
+                
+            
+            key = lambda k_s: sort_convert( data_convert( k_s ) )
+            
+            reverse = not self._asc
+            
+            texts.sort( key = key, reverse = reverse )
+            
+            invalid_data_convert_texts.sort( key = sort_convert, reverse = reverse )
+            
+            texts.extend( invalid_data_convert_texts )
+            
+            return texts
+            
+        except Exception as e:
+            
+            raise HydrusExceptions.StringSortException( e )
+            
+        
+    
+    def ToString( self, simple = False, with_type = False ) -> str:
+        
+        if simple:
+            
+            return 'sorter'
+            
+        
+        result = 'sorting {} ({})'.format( sort_str_enum[ self._sort_type ], 'ascending' if self._asc else 'descending' )
+        
+        if self._regex is not None:
+            
+            result = '{} (with regex)'.format( result )
+            
+        
+        if with_type:
+            
+            result = 'SORT: {}'.format( result )
+            
+        
+        return result
+        
+    
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_STRING_SORTER ] = StringSorter
+
 class StringSplitter( StringProcessingStep ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_STRING_SPLITTER
@@ -3743,20 +4133,47 @@ class StringProcessor( HydrusSerialisable.SerialisableBase ):
         return proc_strings
         
     
-    def ProcessStrings( self, starting_strings: typing.Iterable[ str ], max_steps_allowed = None ) -> typing.List[ str ]:
+    def ProcessStrings( self, starting_strings: typing.Iterable[ str ], max_steps_allowed = None, no_slicing = False ) -> typing.List[ str ]:
         
-        final_strings = []
+        current_strings = list( starting_strings )
         
-        for starting_string in starting_strings:
+        for ( i, processing_step ) in enumerate( self._processing_steps ):
             
-            current_strings = [ starting_string ]
-            
-            for ( i, processing_step ) in enumerate( self._processing_steps ):
+            if max_steps_allowed is not None and i >= max_steps_allowed:
                 
-                if max_steps_allowed is not None and i >= max_steps_allowed:
+                break
+                
+            
+            if isinstance( processing_step, StringSorter ):
+                
+                try:
                     
-                    break
+                    next_strings = processing_step.Sort( current_strings )
                     
+                except HydrusExceptions.StringSortException:
+                    
+                    next_strings = current_strings
+                    
+                
+            elif isinstance( processing_step, StringSlicer ):
+                
+                if no_slicing:
+                    
+                    next_strings = current_strings
+                    
+                else:
+                    
+                    try:
+                        
+                        next_strings = processing_step.Slice( current_strings )
+                        
+                    except:
+                        
+                        next_strings = current_strings
+                        
+                    
+                
+            else:
                 
                 next_strings = []
                 
@@ -3814,13 +4231,11 @@ class StringProcessor( HydrusSerialisable.SerialisableBase ):
                         
                     
                 
-                current_strings = next_strings
-                
             
-            final_strings.extend( current_strings )
+            current_strings = next_strings
             
         
-        return final_strings
+        return current_strings
         
     
     def SetProcessingSteps( self, processing_steps: typing.List[ StringProcessingStep ] ):
@@ -3851,6 +4266,16 @@ class StringProcessor( HydrusSerialisable.SerialisableBase ):
             if True in ( isinstance( ps, StringSplitter ) for ps in self._processing_steps ):
                 
                 components.append( 'splitting' )
+                
+            
+            if True in ( isinstance( ps, StringSorter ) for ps in self._processing_steps ):
+                
+                components.append( 'sorting' )
+                
+            
+            if True in ( isinstance( ps, StringSlicer ) for ps in self._processing_steps ):
+                
+                components.append( 'selecting/slicing' )
                 
             
             return 'some {}'.format( ', '.join( components ) )

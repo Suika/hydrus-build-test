@@ -13,8 +13,8 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNetwork
 from hydrus.core import HydrusPaths
+from hydrus.core.networking import HydrusNetwork
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
@@ -42,6 +42,7 @@ from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import ClientGUITags
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.networking import ClientGUIHydrusNetwork
 from hydrus.client.metadata import ClientTags
 
 class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea ):
@@ -969,21 +970,19 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea ):
     
     def _ModifyUploaders( self, file_service_key ):
         
-        QW.QMessageBox.information( self, 'Information', 'this does not work yet!' )
-        
-        return
-        
         hashes = self._GetSelectedHashes()
         
-        if hashes is not None and len( hashes ) > 0:   
+        contents = [ HydrusNetwork.Content( HC.CONTENT_TYPE_FILES, ( hash, ) ) for hash in hashes ]
+        
+        if len( contents ) > 0:
             
-            contents = [ HydrusNetwork.Content( HC.CONTENT_TYPE_FILES, [ hash ] ) for hash in hashes ]
+            subject_account_identifiers = [ HydrusNetwork.AccountIdentifier( content = content ) for content in contents ]
             
-            subject_accounts = 'blah' # fetch subjects from server with the contents
+            frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'manage accounts' )
             
-            with ClientGUIDialogs.DialogModifyAccounts( self, file_service_key, subject_accounts ) as dlg: dlg.exec()
+            panel = ClientGUIHydrusNetwork.ModifyAccountsPanel( frame, file_service_key, subject_account_identifiers )
             
-            self.setFocus( QC.Qt.OtherFocusReason )
+            frame.SetPanel( panel )
             
         
     
@@ -2193,6 +2192,8 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea ):
             
             self._Select( ClientMedia.FileFilter( ClientMedia.FILE_FILTER_TAGS, ( and_or_or, tags ) ) )
             
+            self.setFocus( QC.Qt.OtherFocusReason )
+            
         
     
     def SetDuplicateStatusForAll( self, duplicate_type ):
@@ -3302,9 +3303,9 @@ class MediaPanelThumbnails( MediaPanel ):
             
             file_service_keys = { repository.GetServiceKey() for repository in file_repositories }
             upload_permission_file_service_keys = { repository.GetServiceKey() for repository in file_repositories if repository.HasPermission( HC.CONTENT_TYPE_FILES, HC.PERMISSION_ACTION_CREATE ) }
-            petition_resolve_permission_file_service_keys = { repository.GetServiceKey() for repository in file_repositories if repository.HasPermission( HC.CONTENT_TYPE_FILES, HC.PERMISSION_ACTION_OVERRULE ) }
+            petition_resolve_permission_file_service_keys = { repository.GetServiceKey() for repository in file_repositories if repository.HasPermission( HC.CONTENT_TYPE_FILES, HC.PERMISSION_ACTION_MODERATE ) }
             petition_permission_file_service_keys = { repository.GetServiceKey() for repository in file_repositories if repository.HasPermission( HC.CONTENT_TYPE_FILES, HC.PERMISSION_ACTION_PETITION ) } - petition_resolve_permission_file_service_keys
-            user_manage_permission_file_service_keys = { repository.GetServiceKey() for repository in file_repositories if repository.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_OVERRULE ) }
+            user_manage_permission_file_service_keys = { repository.GetServiceKey() for repository in file_repositories if repository.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE ) }
             ipfs_service_keys = { service.GetServiceKey() for service in ipfs_services }
             
             focused_is_ipfs = True in ( service_key in ipfs_service_keys for service_key in self._focused_media.GetLocationsManager().GetCurrentRemote() )
@@ -3512,12 +3513,12 @@ class MediaPanelThumbnails( MediaPanel ):
             
             if len( disparate_petitioned_file_service_keys ) > 0:
                 
-                ClientGUIMedia.AddServiceKeyLabelsToMenu( selection_info_menu, disparate_petitioned_file_service_keys, 'some petitioned from' )
+                ClientGUIMedia.AddServiceKeyLabelsToMenu( selection_info_menu, disparate_petitioned_file_service_keys, 'some petitioned for removal from' )
                 
             
             if len( common_petitioned_file_service_keys ) > 0:
                 
-                ClientGUIMedia.AddServiceKeyLabelsToMenu( selection_info_menu, common_petitioned_file_service_keys, 'petitioned from' )
+                ClientGUIMedia.AddServiceKeyLabelsToMenu( selection_info_menu, common_petitioned_file_service_keys, 'petitioned for removal from' )
                 
             
             if len( disparate_deleted_file_service_keys ) > 0:
@@ -3942,6 +3943,7 @@ class MediaPanelThumbnails( MediaPanel ):
                         
                     
                     if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+                        
                         ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[HC.DUPLICATE_ALTERNATE] + ' (advanced!)', 'Edit what happens when you set this status.', self._EditDuplicateActionOptions, HC.DUPLICATE_ALTERNATE )
                         
                     
@@ -3951,18 +3953,6 @@ class MediaPanelThumbnails( MediaPanel ):
                     
                 
                 ClientGUIMenus.AppendMenu( duplicates_menu, duplicates_action_submenu, 'set relationship' )
-                
-            
-            if self._focused_media.HasImages():
-                
-                similar_menu = QW.QMenu( duplicates_menu )
-                
-                ClientGUIMenus.AppendMenuItem( similar_menu, 'exact match', 'Search the database for files that look precisely like those selected.', self._GetSimilarTo, HC.HAMMING_EXACT_MATCH )
-                ClientGUIMenus.AppendMenuItem( similar_menu, 'very similar', 'Search the database for files that look just like those selected.', self._GetSimilarTo, HC.HAMMING_VERY_SIMILAR )
-                ClientGUIMenus.AppendMenuItem( similar_menu, 'similar', 'Search the database for files that look generally like those selected.', self._GetSimilarTo, HC.HAMMING_SIMILAR )
-                ClientGUIMenus.AppendMenuItem( similar_menu, 'speculative', 'Search the database for files that probably look like those selected. This is sometimes useful for symbols with sharp edges or lines.', self._GetSimilarTo, HC.HAMMING_SPECULATIVE )
-                
-                ClientGUIMenus.AppendMenu( duplicates_menu, similar_menu, 'find similar-looking files' )
                 
             
             if len( duplicates_menu.actions() ) == 0:
@@ -3990,8 +3980,22 @@ class MediaPanelThumbnails( MediaPanel ):
             
             open_menu = QW.QMenu( menu )
             
-            ClientGUIMenus.AppendMenuItem( open_menu, 'in external program', 'Launch this file with your OS\'s default program for it.', self._OpenExternally )
             ClientGUIMenus.AppendMenuItem( open_menu, 'in a new page', 'Copy your current selection into a simple new page.', self._ShowSelectionInNewPage )
+            
+            if self._focused_media.HasImages():
+                
+                similar_menu = QW.QMenu( open_menu )
+                
+                ClientGUIMenus.AppendMenuItem( similar_menu, 'exact match', 'Search the database for files that look precisely like those selected.', self._GetSimilarTo, HC.HAMMING_EXACT_MATCH )
+                ClientGUIMenus.AppendMenuItem( similar_menu, 'very similar', 'Search the database for files that look just like those selected.', self._GetSimilarTo, HC.HAMMING_VERY_SIMILAR )
+                ClientGUIMenus.AppendMenuItem( similar_menu, 'similar', 'Search the database for files that look generally like those selected.', self._GetSimilarTo, HC.HAMMING_SIMILAR )
+                ClientGUIMenus.AppendMenuItem( similar_menu, 'speculative', 'Search the database for files that probably look like those selected. This is sometimes useful for symbols with sharp edges or lines.', self._GetSimilarTo, HC.HAMMING_SPECULATIVE )
+                
+                ClientGUIMenus.AppendMenu( open_menu, similar_menu, 'similar-looking files' )
+                
+            
+            ClientGUIMenus.AppendSeparator( open_menu )
+            ClientGUIMenus.AppendMenuItem( open_menu, 'in external program', 'Launch this file with your OS\'s default program for it.', self._OpenExternally )
             ClientGUIMenus.AppendMenuItem( open_menu, 'in web browser', 'Show this file in your OS\'s web browser.', self._OpenFileInWebBrowser )
             
             if focused_is_local:
@@ -4771,7 +4775,7 @@ class Thumbnail( Selectable ):
                     
                     painter.setBrush( QG.QBrush( background_colour_with_alpha ) )
                     
-                    text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, upper_summary )
+                    ( text_size, upper_summary ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, upper_summary )
                     
                     box_x = thumbnail_border
                     box_y = thumbnail_border
@@ -4787,7 +4791,7 @@ class Thumbnail( Selectable ):
                     
                     painter.setPen( QG.QPen( text_colour_with_alpha ) )
                     
-                    QP.DrawText( painter, text_x, text_y, upper_summary )
+                    ClientGUIFunctions.DrawText( painter, text_x, text_y, upper_summary )
                     
                 
                 if len( lower_summary ) > 0:
@@ -4800,7 +4804,7 @@ class Thumbnail( Selectable ):
                     
                     painter.setBrush( QG.QBrush( background_colour_with_alpha ) )
                     
-                    text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, lower_summary )
+                    ( text_size, lower_summary ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, lower_summary )
                     
                     text_width = text_size.width()
                     text_height = text_size.height()
@@ -4819,7 +4823,7 @@ class Thumbnail( Selectable ):
                     
                     painter.setPen( QG.QPen( text_colour_with_alpha ) )
                     
-                    QP.DrawText( painter, text_x, text_y, lower_summary )
+                    ClientGUIFunctions.DrawText( painter, text_x, text_y, lower_summary )
                     
                 
             
@@ -4917,7 +4921,7 @@ class Thumbnail( Selectable ):
             
             painter.setFont( QW.QApplication.font() )
             
-            text_size = painter.fontMetrics().size( QC.Qt.TextSingleLine, num_files_str )
+            ( text_size, num_files_str ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, num_files_str )
             
             text_width = text_size.width()
             text_height = text_size.height()
@@ -4930,7 +4934,7 @@ class Thumbnail( Selectable ):
             
             painter.setPen( QG.QPen( CC.COLOUR_SELECTED_DARK ) )
             
-            QP.DrawText( painter, 18, height - text_height - 2, num_files_str )
+            ClientGUIFunctions.DrawText( painter, 18, height - text_height - 2, num_files_str )
             
         
         # top left icons

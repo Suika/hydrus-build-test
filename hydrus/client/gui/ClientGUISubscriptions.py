@@ -19,7 +19,6 @@ from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientPaths
 from hydrus.client.gui import ClientGUIAsync
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
@@ -33,6 +32,8 @@ from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportSubscriptions
 from hydrus.client.importing import ClientImportSubscriptionQuery
@@ -135,7 +136,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the html subscriptions help', 'Open the help page for subscriptions in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -795,7 +796,16 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
             
         except:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard' )
+            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard!' )
+            
+            return
+            
+        
+        if len( pasted_query_texts ) == 0:
+            
+            QW.QMessageBox.warning( self, 'Empty Paste?', 'The clipboard did not seem to have anything in it!' )
+            
+            return
             
         
         current_query_texts_lower = { query_text.lower() for query_text in self._GetCurrentQueryTexts() }
@@ -820,11 +830,13 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         already_existing_query_texts = sorted( already_existing_query_texts )
         new_query_texts = sorted( new_query_texts )
         
+        message = ''
+        
         if len( already_existing_query_texts ) > 0:
             
             if len( already_existing_query_texts ) > 50:
                 
-                message = '{} queries were already in the subscription, so they need not be added.'.format( HydrusData.ToHumanInt( len( already_existing_query_texts ) ) )
+                message += '{} queries were already in the subscription.'.format( HydrusData.ToHumanInt( len( already_existing_query_texts ) ) )
                 
             else:
                 
@@ -837,38 +849,45 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
                     aeqt_separator = os.linesep
                     
                 
-                message = 'The queries:'
+                message += 'The queries:'
                 message += os.linesep * 2
                 message += aeqt_separator.join( already_existing_query_texts )
                 message += os.linesep * 2
-                message += 'Were already in the subscription, so they need not be added.'
+                message += 'Were already in the subscription.'
                 
             
-            if len( new_query_texts ) > 0:
+        
+        if len( new_query_texts ) > 0:
+            
+            if len( already_existing_query_texts ) > 0:
                 
-                if len( new_query_texts ) > 50:
+                message += os.linesep * 2
+                
+            
+            if len( new_query_texts ) > 50:
+                
+                message += '{} queries were added.'.format( HydrusData.ToHumanInt( len( new_query_texts ) ) )
+                
+            else:
+                
+                if len( new_query_texts ) > 5:
                     
-                    message = '{} queries were new and will be added.'.format( HydrusData.ToHumanInt( len( new_query_texts ) ) )
+                    nqt_separator = ', '
                     
                 else:
                     
-                    if len( new_query_texts ) > 5:
-                        
-                        nqt_separator = ', '
-                        
-                    else:
-                        
-                        nqt_separator = os.linesep
-                        
-                    
-                    message += os.linesep * 2
-                    message += 'The queries:'
-                    message += os.linesep * 2
-                    message += nqt_separator.join( new_query_texts )
-                    message += os.linesep * 2
-                    message += 'Were new and will be added.'
+                    nqt_separator = os.linesep
                     
                 
+                message += 'The queries:'
+                message += os.linesep * 2
+                message += nqt_separator.join( new_query_texts )
+                message += os.linesep * 2
+                message += 'Were added.'
+                
+            
+        
+        if len( message ) > 0:
             
             QW.QMessageBox.information( self, 'Information', message )
             
@@ -1219,7 +1238,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the html subscriptions help', 'Open the help page for subscriptions in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         

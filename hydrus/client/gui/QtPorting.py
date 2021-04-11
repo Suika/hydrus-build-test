@@ -412,7 +412,15 @@ class TabBar( QW.QTabBar ):
             
             self._last_clicked_global_pos = event.globalPos()
             
-        elif event.button() == QC.Qt.MiddleButton:
+        
+        QW.QTabBar.mousePressEvent( self, event )
+        
+    
+    def mouseReleaseEvent( self, event ):
+        
+        index = self.tabAt( event.pos() )
+        
+        if event.button() == QC.Qt.MiddleButton:
             
             if index != -1:
                 
@@ -422,7 +430,7 @@ class TabBar( QW.QTabBar ):
                 
             
         
-        QW.QTabBar.mousePressEvent( self, event )
+        QW.QTabBar.mouseReleaseEvent( self, event )
         
     
     def mouseDoubleClickEvent( self, event ):
@@ -1160,14 +1168,6 @@ def AdjustOpacity( image, opacity_factor ):
     painter.drawImage( 0, 0, image )
     
     return new_image
-
-
-def DrawText( painter, x, y, text ):
-    
-    boundingRect = painter.fontMetrics().size( QC.Qt.TextSingleLine, text )
-
-    painter.drawText( QC.QRectF( x, y, boundingRect.width(), boundingRect.height() ), text )
-
 
 def ToKeySequence( modifiers, key ):
     

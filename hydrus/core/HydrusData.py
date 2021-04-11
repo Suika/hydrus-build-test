@@ -108,30 +108,46 @@ def ConvertIntToPrettyOrdinalString( num: int ):
         return 'unknown position'
         
     
-    remainder = abs( num ) % 10
+    tens = ( abs( num ) % 100 ) // 10
     
-    if remainder == 1:
+    if tens == 1:
         
-        ordinal = 'st'
-        
-    elif remainder == 2:
-        
-        ordinal = 'nd'
-        
-    elif remainder == 3:
-        
-        ordinal = 'rd'
+        ordinal = 'th'
         
     else:
         
-        ordinal = 'th'
+        remainder = abs( num ) % 10
+        
+        if remainder == 1:
+            
+            ordinal = 'st'
+            
+        elif remainder == 2:
+            
+            ordinal = 'nd'
+            
+        elif remainder == 3:
+            
+            ordinal = 'rd'
+            
+        else:
+            
+            ordinal = 'th'
+            
         
     
     s = '{}{}'.format( ToHumanInt( abs( num ) ), ordinal )
     
     if num < 0:
         
-        s = '{} from last'.format( s )
+        if num == -1:
+            
+            s = 'last'
+            
+        else:
+            
+            s = '{} from last'.format( s )
+            
         
     
     return s
@@ -402,7 +418,7 @@ def ConvertTimestampToPrettyTime( timestamp, in_utc = False, include_24h_time = 
         return 'unparseable time {}'.format( timestamp )
         
     
-def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'now', just_now_threshold = 3, show_seconds = True ):
+def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'now', just_now_threshold = 3, show_seconds = True, no_prefix = False ):
     
     if timestamp is None:
         
@@ -431,7 +447,14 @@ def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'now', just_now_thr
             
         else:
             
-            return 'in ' + time_delta_string
+            if no_prefix:
+                
+                return time_delta_string
+                
+            else:
+                
+                return 'in ' + time_delta_string
+                
             
         
     except:
@@ -1090,21 +1113,30 @@ ShowText = Print
 
 def PrintException( e, do_wait = True ):
     
-    if isinstance( e, HydrusExceptions.ShutdownException ):
+    ( etype, value, tb ) = sys.exc_info()
+    
+    PrintExceptionTuple( etype, value, tb, do_wait = do_wait )
+    
+def PrintExceptionTuple( etype, value, tb, do_wait = True ):
+    
+    if etype is None:
+        
+        etype = HydrusExceptions.UnknownException
+        
+    
+    if etype == HydrusExceptions.ShutdownException:
         
         return
         
     
-    etype = type( e )
-    
-    ( etype, value, tb ) = sys.exc_info()
-    
-    if etype is None:
+    if value is None:
         
-        etype = type( e )
-        value = str( e )
+        value = 'Unknown error'
         
-        trace = 'No error trace'
+    
+    if tb is None:
+        
+        trace = 'No error trace--here is the stack:' + os.linesep + ''.join( traceback.format_stack() )
         
     else:
         
@@ -1128,8 +1160,9 @@ def PrintException( e, do_wait = True ):
         
     
 ShowException = PrintException
+ShowExceptionTuple = PrintExceptionTuple
 
-def Profile( summary, code, g, l, min_duration_ms = 20 ):
+def Profile( summary, code, g, l, min_duration_ms = 20, show_summary = False ):
     
     profile = cProfile.Profile()
     
@@ -1165,6 +1198,11 @@ def Profile( summary, code, g, l, min_duration_ms = 20 ):
         output.seek( 0 )
         
         details = output.read()
+        
+        if show_summary:
+            
+            ShowText( summary )
+            
         
     else:
         
@@ -1250,6 +1288,31 @@ def RestartProcess():
         
     
     os.execv( exe, args )
+    
+def SampleSetByGettingFirst( s: set, n ):
+    
+    # sampling from a big set can be slow, so if we don't care about super random, let's just rip off the front and let __hash__ be our random
+    
+    n = min( len( s ), n )
+    
+    sample = set()
+    
+    if n == 0:
+        
+        return sample
+        
+    
+    for ( i, obj ) in enumerate( s ):
+        
+        sample.add( obj )
+        
+        if i >= n - 1:
+            
+            break
+            
+        
+    
+    return sample
     
 def SetsIntersect( a, b ):
     
@@ -1497,75 +1560,6 @@ class HydrusYAMLBase( yaml.YAMLObject ):
     yaml_loader = yaml.SafeLoader
     yaml_dumper = yaml.SafeDumper
     
-class AccountType( HydrusYAMLBase ):
-    
-    yaml_tag = '!AccountType'
-    
-    def __init__( self, title, permissions, max_monthly_data ):
-        
-        HydrusYAMLBase.__init__( self )
-        
-        self._title = title
-        self._permissions = permissions
-        self._max_monthly_data = max_monthly_data
-        
-    
-    def __repr__( self ): return self.ConvertToString()
-    
-    def GetPermissions( self ): return self._permissions
-    
-    def GetTitle( self ): return self._title
-    
-    def GetMaxBytes( self ):
-        
-        ( max_num_bytes, max_num_requests ) = self._max_monthly_data
-        
-        return max_num_bytes
-        
-    
-    def GetMaxRequests( self ):
-        
-        ( max_num_bytes, max_num_requests ) = self._max_monthly_data
-        
-        return max_num_requests
-        
-    
-    def GetMaxBytesString( self ):
-        
-        ( max_num_bytes, max_num_requests ) = self._max_monthly_data
-        
-        if max_num_bytes is None: max_num_bytes_string = 'No limit'
-        else: max_num_bytes_string = ToHumanBytes( max_num_bytes )
-        
-        return max_num_bytes_string
-        
-    
-    def GetMaxRequestsString( self ):
-        
-        ( max_num_bytes, max_num_requests ) = self._max_monthly_data
-        
-        if max_num_requests is None: max_num_requests_string = 'No limit'
-        else: max_num_requests_string = ToHumanInt( max_num_requests )
-        
-        return max_num_requests_string
-        
-    
-    def ConvertToString( self ):
-        
-        result_string = self._title + ' with '
-        
-        if self._permissions == [ HC.UNKNOWN_PERMISSION ]: result_string += 'no permissions'
-        else: result_string += ', '.join( [ HC.permissions_string_lookup[ permission ] for permission in self._permissions ] ) + ' permissions'
-        
-        return result_string
-        
-    
-    def IsUnknownAccountType( self ): return self._permissions == [ HC.UNKNOWN_PERMISSION ]
-    
-    def HasPermission( self, permission ): return permission in self._permissions
-    
-sqlite3.register_adapter( AccountType, yaml.safe_dump )
-
 class BigJobPauser( object ):
     
     def __init__( self, period = 10, wait_time = 0.1 ):

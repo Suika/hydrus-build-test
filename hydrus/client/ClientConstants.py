@@ -10,9 +10,6 @@ BLANK_PHASH = b'\x80\x00\x00\x00\x00\x00\x00\x00' # first bit 1 but everything e
 
 CAN_HIDE_MOUSE = True
 
-FILTER_WHITELIST = 0
-FILTER_BLACKLIST = 1
-
 # Hue is generally 200, Sat and Lum changes based on need
 COLOUR_LIGHT_SELECTED = QG.QColor( 235, 248, 255 )
 COLOUR_SELECTED = QG.QColor( 217, 242, 255 )
@@ -274,17 +271,6 @@ SHUTDOWN_TIMESTAMP_VACUUM = 0
 SHUTDOWN_TIMESTAMP_FATTEN_AC_CACHE = 1
 SHUTDOWN_TIMESTAMP_DELETE_ORPHANS = 2
 
-SORT_BY_LEXICOGRAPHIC_ASC = 8
-SORT_BY_LEXICOGRAPHIC_DESC = 9
-SORT_BY_INCIDENCE_ASC = 10
-SORT_BY_INCIDENCE_DESC = 11
-SORT_BY_LEXICOGRAPHIC_NAMESPACE_ASC = 12
-SORT_BY_LEXICOGRAPHIC_NAMESPACE_DESC = 13
-SORT_BY_INCIDENCE_NAMESPACE_ASC = 14
-SORT_BY_INCIDENCE_NAMESPACE_DESC = 15
-SORT_BY_LEXICOGRAPHIC_IGNORE_NAMESPACE_ASC = 16
-SORT_BY_LEXICOGRAPHIC_IGNORE_NAMESPACE_DESC = 17
-
 SORT_FILES_BY_FILESIZE = 0
 SORT_FILES_BY_DURATION = 1
 SORT_FILES_BY_IMPORT_TIME = 2
@@ -433,20 +419,16 @@ class GlobalPixmaps( object ):
         
         self._Initialise()
         
-        GlobalPixmaps.my_instance = self
-        
     
     @staticmethod
     def instance() -> 'GlobalPixmaps':
         
         if GlobalPixmaps.my_instance is None:
             
-            raise Exception( 'GlobalPixmaps is not yet initialised!' )
+            GlobalPixmaps.my_instance = GlobalPixmaps()
             
-        else:
-            
-            return GlobalPixmaps.my_instance
-            
+        
+        return GlobalPixmaps.my_instance
         
     
     def _Initialise( self ):
@@ -532,7 +514,7 @@ class GlobalPixmaps( object ):
         self.copy = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'copy.png' ) )
         self.paste = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'paste.png' ) )
         
-        self.eight_kun = QG.QPixmap( os.path.join( HC.STATIC_DIR, '8kun.png' ) )
+        self.eight_chan = QG.QPixmap( os.path.join( HC.STATIC_DIR, '8chan.png' ) )
         self.twitter = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'twitter.png' ) )
         self.tumblr = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'tumblr.png' ) )
         self.discord = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'discord.png' ) )
@@ -543,6 +525,7 @@ class GlobalPixmaps( object ):
         self.previous = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'previous.png' ) )
         self.next_bmp = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'next.png' ) )
         self.last = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'last.png' ) )
+        self.pair = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'pair.png' ) )
         
 
 global_pixmaps = GlobalPixmaps.instance

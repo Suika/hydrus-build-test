@@ -5,15 +5,15 @@ import unittest
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNetwork
 from hydrus.core import HydrusSerialisable
+from hydrus.core.networking import HydrusNetwork
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientDB
 from hydrus.client import ClientDefaults
 from hydrus.client import ClientExporting
 from hydrus.client import ClientSearch
 from hydrus.client import ClientServices
+from hydrus.client.db import ClientDB
 from hydrus.client.gui import ClientGUIManagement
 from hydrus.client.gui import ClientGUIPages
 from hydrus.client.importing import ClientImportLocal
@@ -176,6 +176,57 @@ class TestClientDB( unittest.TestCase ):
         result = self._read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, CC.COMBINED_FILE_SERVICE_KEY, search_text = 'c', exact_match = True )
         
         self.assertEqual( result, [] )
+        
+        #
+        
+        result = self._read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, CC.COMBINED_FILE_SERVICE_KEY, search_text = '*' )
+        
+        preds = set()
+        
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'car', min_current_count = 1 ) )
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'series:cars', min_current_count = 1 ) )
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'maker:ford', min_current_count = 1 ) )
+        
+        for p in result: self.assertEqual( p.GetCount( HC.CONTENT_STATUS_CURRENT ), 1 )
+        
+        self.assertEqual( set( result ), preds )
+        
+        #
+        
+        result = self._read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, CC.COMBINED_FILE_SERVICE_KEY, search_text = 'series:*' )
+        
+        preds = set()
+        
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'series:cars', min_current_count = 1 ) )
+        
+        for p in result: self.assertEqual( p.GetCount( HC.CONTENT_STATUS_CURRENT ), 1 )
+        
+        self.assertEqual( set( result ), preds )
+        
+        #
+        
+        result = self._read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, CC.COMBINED_FILE_SERVICE_KEY, search_text = 'c*r*' )
+        
+        preds = set()
+        
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'car', min_current_count = 1 ) )
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'series:cars', min_current_count = 1 ) )
+        
+        for p in result: self.assertEqual( p.GetCount( HC.CONTENT_STATUS_CURRENT ), 1 )
+        
+        self.assertEqual( set( result ), preds )
+        
+        #
+        
+        result = self._read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, CC.COMBINED_FILE_SERVICE_KEY, search_text = 'ser*', search_namespaces_into_full_tags = True )
+        
+        preds = set()
+        
+        preds.add( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'series:cars', min_current_count = 1 ) )
+        
+        for p in result: self.assertEqual( p.GetCount( HC.CONTENT_STATUS_CURRENT ), 1 )
+        
+        self.assertEqual( set( result ), preds )
         
     
     def test_export_folders( self ):
@@ -672,6 +723,58 @@ class TestClientDB( unittest.TestCase ):
         for i in range( len( predicates ) ): self.assertEqual( result[i].GetCount(), predicates[i].GetCount() )
         
     
+    def test_filter_existing_tags( self ):
+        
+        TestClientDB._clear_db()
+        
+        hash = b'\xadm5\x99\xa6\xc4\x89\xa5u\xeb\x19\xc0&\xfa\xce\x97\xa9\xcdey\xe7G(\xb0\xce\x94\xa6\x01\xd22\xf3\xc3'
+        
+        #
+        
+        services = list( self._read( 'services' ) )
+        
+        new_service_key = HydrusData.GenerateKey()
+        
+        services.append( ClientServices.GenerateService( new_service_key, HC.LOCAL_TAG, 'new service' ) )
+        
+        empty_service_key = HydrusData.GenerateKey()
+        
+        services.append( ClientServices.GenerateService( empty_service_key, HC.LOCAL_TAG, 'empty service' ) )
+        
+        self._write( 'update_services', services )
+        
+        #
+        
+        service_keys_to_content_updates = {}
+        
+        content_updates = []
+        
+        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'character:samus aran', ( hash, ) ) ) )
+        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:metroid', ( hash, ) ) ) )
+        
+        service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = content_updates
+        
+        content_updates = []
+        
+        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'clothing:bodysuit', ( hash, ) ) ) )
+        
+        service_keys_to_content_updates[ new_service_key ] = content_updates
+        
+        self._write( 'content_updates', service_keys_to_content_updates )
+        
+        result = self._read( 'filter_existing_tags', CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, { 'character:samus aran', 'series:metroid', 'clothing:bodysuit' } )
+        
+        self.assertEqual( result, { 'character:samus aran', 'series:metroid' } )
+        
+        result = self._read( 'filter_existing_tags', new_service_key, { 'character:samus aran', 'series:metroid', 'clothing:bodysuit' } )
+        
+        self.assertEqual( result, { 'clothing:bodysuit' } )
+        
+        result = self._read( 'filter_existing_tags', empty_service_key, { 'character:samus aran', 'series:metroid', 'clothing:bodysuit' } )
+        
+        self.assertEqual( result, set() )
+        
+    
     def test_gui_sessions( self ):
         
         def qt_code():
@@ -1108,7 +1211,7 @@ class TestClientDB( unittest.TestCase ):
         
         result = self._read( 'serialisable_simple', 'pixiv_account' )
         
-        self.assertTrue( result, ( pixiv_id, password ) )
+        self.assertEqual( result, [ pixiv_id, password ] )
         
     
     def test_services( self ):

@@ -90,23 +90,38 @@ class FileImportJob( object ):
             
             self.GenerateInfo()
             
-            self.CheckIsGoodToImport()
-            
-            mime = self.GetMime()
-            
-            if status_hook is not None:
+            try:
                 
-                status_hook( 'copying file' )
+                self.CheckIsGoodToImport()
                 
-            
-            HG.client_controller.client_files_manager.AddFile( hash, mime, self._temp_path, thumbnail_bytes = self._thumbnail_bytes )
-            
-            if status_hook is not None:
+                ok_to_go = True
                 
-                status_hook( 'updating database' )
+            except HydrusExceptions.FileSizeException as e:
+                
+                ok_to_go = False
+                
+                import_status = CC.STATUS_VETOED
+                note = str( e )
                 
             
-            ( import_status, note ) = HG.client_controller.WriteSynchronous( 'import_file', self )
+            if ok_to_go:
+                
+                mime = self.GetMime()
+                
+                if status_hook is not None:
+                    
+                    status_hook( 'copying file' )
+                    
+                
+                HG.client_controller.client_files_manager.AddFile( hash, mime, self._temp_path, thumbnail_bytes = self._thumbnail_bytes )
+                
+                if status_hook is not None:
+                    
+                    status_hook( 'updating database' )
+                    
+                
+                ( import_status, note ) = HG.client_controller.WriteSynchronous( 'import_file', self )
+                
             
         else:
             
@@ -1065,7 +1080,7 @@ class FileSeed( HydrusSerialisable.SerialisableBase ):
                     return False
                     
                 
-                in_inbox = HG.client_controller.Read( 'in_inbox', hash )
+                in_inbox = hash in HG.client_controller.Read( 'inbox_hashes', ( hash, ) )
                 
             
             if file_import_options.ShouldPresent( self.status, in_inbox ):
@@ -1143,9 +1158,13 @@ class FileSeed( HydrusSerialisable.SerialisableBase ):
                     
                     status_hook( 'downloading file page' )
                     
-                    if self._referral_url not in ( post_url, url_to_check ):
+                    if self._referral_url is not None and self._referral_url != url_to_check:
                         
                         referral_url = self._referral_url
+                        
+                    elif url_to_check != post_url:
+                        
+                        referral_url = post_url
                         
                     else:
                         
@@ -1162,6 +1181,20 @@ class FileSeed( HydrusSerialisable.SerialisableBase ):
                         
                     
                     parsing_text = network_job.GetContentText()
+                    
+                    actual_fetched_url = network_job.GetActualFetchedURL()
+                    
+                    if actual_fetched_url != url_to_check:
+                        
+                        ( url_type, match_name, can_parse ) = HG.client_controller.network_engine.domain_manager.GetURLParseCapability( actual_fetched_url )
+                        
+                        if url_type == HC.URL_TYPE_POST and can_parse:
+                            
+                            post_url = actual_fetched_url
+                            
+                            ( url_to_check, parser ) = HG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( post_url )
+                            
+                        
                     
                     parsing_context = {}
                     
@@ -2362,7 +2395,7 @@ class FileSeedCache( HydrusSerialisable.SerialisableBase ):
         
         if len( file_seed_hashes ) > 0:
             
-            inbox_hashes = HG.client_controller.Read( 'in_inbox', file_seed_hashes )
+            inbox_hashes = HG.client_controller.Read( 'inbox_hashes', file_seed_hashes )
             
         else:
             

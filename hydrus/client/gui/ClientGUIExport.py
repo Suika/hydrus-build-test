@@ -10,21 +10,23 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientExporting
 from hydrus.client import ClientSearch
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
+from hydrus.client.gui import ClientGUITags
 from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
-from hydrus.client.metadata import ClientTags
 from hydrus.client.gui.search import ClientGUIACDropdown
+from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.metadata import ClientTags
 
 class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
     
@@ -430,6 +432,86 @@ If you select synchronise, be careful!'''
         return export_folder
         
     
+class EditSidecarExporterPanel( ClientGUIScrolledPanels.EditPanel ):
+    
+    def __init__( self, parent, sidecar_exporter: ClientExporting.SidecarExporter ):
+        
+        ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        
+        self._service_keys_to_tag_data = dict( sidecar_exporter.GetTagData() )
+        
+        #
+        
+        # ok, I guess a multi-column list of services, then tag filter and display type options
+        # open it, you make a new edit panel type
+        
+        # add (with test for remaining services), edit, delete
+        
+        #
+        
+        # populate that lad
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        #QP.AddToLayout( vbox, self._tag_data_listctrl, CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        self.widget().setLayout( vbox )
+        
+    
+    def GetValue( self ):
+        
+        sidecar_exporter = ClientExporting.SidecarExporter( service_keys_to_tag_data = self._service_keys_to_tag_data )
+        
+        return sidecar_exporter
+        
+    
+class EditSidecarExporterTagDataPanel( ClientGUIScrolledPanels.EditPanel ):
+    
+    def __init__( self, parent, tag_filter: HydrusTags.TagFilter, tag_display_type: int ):
+        
+        ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        
+        #
+        
+        message = 'Filter the tags you want to export here. Anything that passes this filter is exported.'
+        
+        self._tag_filter = ClientGUITags.TagFilterButton( self, message, tag_filter )
+        
+        self._tag_display_type = ClientGUICommon.BetterChoice( self )
+        
+        self._tag_display_type.addItem( 'with siblings and parents applied', ClientTags.TAG_DISPLAY_ACTUAL )
+        self._tag_display_type.addItem( 'as the tags are actually stored', ClientTags.TAG_DISPLAY_STORAGE )
+        
+        #
+        
+        self._tag_display_type.SetValue( tag_display_type )
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        rows = []
+        
+        rows.append( ( 'Tags to export: ', self._tag_filter ) )
+        rows.append( ( 'Type to export: ', self._tag_display_type ) )
+        
+        gridbox = ClientGUICommon.WrapInGrid( self, rows )
+        
+        QP.AddToLayout( vbox, gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        
+        self.widget().setLayout( vbox )
+        
+    
+    def GetValue( self ):
+        
+        tag_filter = self._tag_filter.GetValue()
+        tag_display_type = self._tag_display_type.GetValue()
+        
+        return ( tag_filter, tag_display_type )
+        
+    
 class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
     
     def __init__( self, parent, flat_media, do_export_and_then_quit = False ):
@@ -497,7 +579,10 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         export_path = ClientExporting.GetExportPath()
         
-        self._directory_picker.SetPath( export_path )
+        if export_path is not None:
+            
+            self._directory_picker.SetPath( export_path )
+            
         
         phrase = new_options.GetString( 'export_phrase' )
         
@@ -765,7 +850,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                         
                         HydrusPaths.MirrorFile( source_path, path )
                         
-                        HydrusPaths.MakeFileWritable( path )
+                        HydrusPaths.MakeFileWriteable( path )
                         
                     
                 except:

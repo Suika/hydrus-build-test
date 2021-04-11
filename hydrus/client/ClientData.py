@@ -297,6 +297,23 @@ def ShowExceptionClient( e, do_wait = True ):
         etype = type( e )
         value = str( e )
         
+    
+    ShowExceptionTupleClient( etype, value, tb, do_wait = do_wait )
+    
+def ShowExceptionTupleClient( etype, value, tb, do_wait = True ):
+    
+    if etype is None:
+        
+        etype = HydrusExceptions.UnknownException
+        
+    
+    if value is None:
+        
+        value = 'Unknown error'
+        
+    
+    if tb is None:
+        
         trace = 'No error trace--here is the stack:' + os.linesep + ''.join( traceback.format_stack() )
         
     else:
@@ -319,7 +336,7 @@ def ShowExceptionClient( e, do_wait = True ):
     
     job_key = ClientThreading.JobKey()
     
-    if isinstance( e, HydrusExceptions.ShutdownException ):
+    if etype == HydrusExceptions.ShutdownException:
         
         return
         
@@ -358,7 +375,7 @@ def ShowTextClient( text ):
     
     HG.client_controller.pub( 'message', job_key )
     
-def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'now', just_now_threshold = 3, show_seconds = True ):
+def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'now', just_now_threshold = 3, show_seconds = True, no_prefix = False ):
     
     if HG.client_controller.new_options.GetBoolean( 'always_show_iso_time' ):
         
@@ -366,7 +383,7 @@ def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'now', just_now_thr
         
     else:
         
-        return HydrusData.TimestampToPrettyTimeDelta( timestamp, just_now_string = just_now_string, just_now_threshold = just_now_threshold, show_seconds = show_seconds )
+        return HydrusData.TimestampToPrettyTimeDelta( timestamp, just_now_string = just_now_string, just_now_threshold = just_now_threshold, show_seconds = show_seconds, no_prefix = no_prefix )
         
     
 class Booru( HydrusData.HydrusYAMLBase ):

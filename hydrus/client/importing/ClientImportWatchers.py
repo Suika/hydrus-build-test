@@ -398,7 +398,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                 else:
                     
-                    return 'just added'
+                    return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_WORKING, 'just added' )
                     
                 
             
@@ -412,7 +412,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                 else:
                     
-                    return 'already watching'
+                    return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_WORKING, 'already watching' )
                     
                 
             
@@ -691,11 +691,12 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             self._DelayWork( delay, str( e ) )
             
+            gallery_seed.SetStatus( CC.STATUS_ERROR, str( e ) )
+            
             HydrusData.PrintException( e )
             
         
-        watcher_status = gallery_seed.note
-        watcher_status_should_stick = gallery_seed.status != CC.STATUS_SUCCESSFUL_AND_NEW
+        self._gallery_seed_log.NotifyGallerySeedsUpdated( ( gallery_seed, ) )
         
         with self._lock:
             
@@ -703,8 +704,6 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 
                 self._check_now = False
                 
-            
-            self._watcher_status = watcher_status
             
             self._last_check_time = HydrusData.GetNow()
             
@@ -714,15 +713,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             self._Compact()
             
-        
-        if not watcher_status_should_stick:
-            
-            time.sleep( 5 )
-            
-            with self._lock:
-                
-                self._watcher_status = ''
-                
+            self._watcher_status = ''
             
         
     
@@ -1215,25 +1206,58 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            if self._checking_status == ClientImporting.CHECKER_STATUS_404:
+            gallery_work_to_do = self._gallery_seed_log.WorkToDo()
+            files_work_to_do = self._file_seed_cache.WorkToDo()
+            
+            gallery_go = gallery_work_to_do and not self._checking_paused
+            files_go = files_work_to_do and not self._files_paused
+            
+            if self._watcher_status != '' or self._file_status != '':
                 
-                return '404'
+                return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_WORKING, 'working' )
+                
+            elif gallery_go or files_go:
+                
+                return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_PENDING, 'pending' )
+                
+            elif self._checking_status == ClientImporting.CHECKER_STATUS_404:
+                
+                return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DONE, '404' )
                 
             elif self._checking_status == ClientImporting.CHECKER_STATUS_DEAD:
                 
-                return 'DEAD'
+                return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DONE, 'DEAD' )
                 
             elif not HydrusData.TimeHasPassed( self._no_work_until ):
                 
-                return '{} - next check {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
+                if self._next_check_time is None:
+                    
+                    text = '{} - working again {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( self._no_work_until ) )
+                    
+                else:
+                    
+                    text = '{} - next check {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
+                    
                 
-            elif self._watcher_status != '' or self._file_status != '':
-                
-                return 'working'
+                return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DEFERRED, text )
                 
             else:
                 
-                return ''
+                if self._checking_paused:
+                    
+                    return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_PAUSED, '' )
+                    
+                else:
+                    
+                    if self._next_check_time is None or HydrusData.TimeHasPassed( self._next_check_time ):
+                        
+                        return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_PENDING, 'pending' )
+                        
+                    else:
+                        
+                        return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DEFERRED, ClientData.TimestampToPrettyTimeDelta( self._next_check_time, no_prefix = True ) )
+                        
+                    
                 
             
         
@@ -1254,7 +1278,14 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 
             elif not HydrusData.TimeHasPassed( self._no_work_until ):
                 
-                no_work_text = '{} - next check {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
+                if self._next_check_time is None:
+                    
+                    no_work_text = '{} - working again {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( self._no_work_until ) )
+                    
+                else:
+                    
+                    no_work_text = '{} - next check {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
+                    
                 
                 file_status = no_work_text
                 watcher_status = no_work_text
@@ -1554,6 +1585,16 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 self._checker_repeating_job.Cancel()
                 
                 return
+                
+            
+            while self._gallery_seed_log.WorkToDo():
+                # some old unworked gallery url is hanging around, let's clear it
+                
+                gallery_seed = self._gallery_seed_log.GetNextGallerySeed( CC.STATUS_UNKNOWN )
+                
+                gallery_seed.SetStatus( CC.STATUS_VETOED, note = 'check never finished' )
+                
+                self._gallery_seed_log.NotifyGallerySeedsUpdated( ( gallery_seed, ) )
                 
             
             checking_paused = self._checking_paused or HG.client_controller.new_options.GetBoolean( 'pause_all_watcher_checkers' )

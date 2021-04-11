@@ -10,9 +10,9 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNetworking
 from hydrus.core import HydrusThreading
 from hydrus.core import HydrusText
+from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
@@ -75,6 +75,10 @@ def ConvertStatusCodeAndDataIntoExceptionInfo( status_code, data, is_hydrus_serv
     elif status_code == 409:
         
         eclass = HydrusExceptions.ConflictException
+        
+    elif status_code == 416:
+        
+        eclass = HydrusExceptions.RangeNotSatisfiableException
         
     elif status_code == 419:
         
@@ -160,6 +164,7 @@ class NetworkJob( object ):
         
         self._body = body
         self._referral_url = referral_url
+        self._actual_fetched_url = self._url
         self._temp_path = temp_path
         
         self._files = None
@@ -634,7 +639,7 @@ class NetworkJob( object ):
                         ClientNetworkingDomain.AddCookieToSession( session, name, value, domain, path, expires, secure = secure, rest = rest )
                         
                     
-                    self.engine.session_manager.SetDirty()
+                    self.engine.session_manager.SetSessionDirty( snc )
                     
                 except Exception as e:
                     
@@ -834,6 +839,14 @@ class NetworkJob( object ):
         with self._lock:
             
             return self.engine.domain_manager.GenerateValidationPopupProcess( self._network_contexts )
+            
+        
+    
+    def GetActualFetchedURL( self ):
+        
+        with self._lock:
+            
+            return self._actual_fetched_url
             
         
     
@@ -1160,6 +1173,18 @@ class NetworkJob( object ):
                     
                     response = self._SendRequestAndGetResponse()
                     
+                    # I think tbh I would rather tell requests not to do 3XX, which is possible with allow_redirects = False on request, and then just raise various 3XX exceptions with url info, so I can requeue easier and keep a record
+                    # figuring out correct new url seems a laugh, requests has slight helpers, but lots of exceptions
+                    # SessionRedirectMixin here https://requests.readthedocs.io/en/latest/_modules/requests/sessions/
+                    # but this will do as a patch for now
+                    self._actual_fetched_url = response.url
+                    
+                    
+                    if self._actual_fetched_url != self._url and HG.network_report_mode:
+                        
+                        HydrusData.ShowText( 'Network Jobs Redirect: {} -> {}'.format( self._url, self._actual_fetched_url ) )
+                        
+                    
                     with self._lock:
                         
                         if self._body is not None:
@@ -1310,6 +1335,13 @@ class NetworkJob( object ):
                     self._WaitOnConnectionError( 'read timed out' )
                     
                 finally:
+                    
+                    with self._lock:
+                        
+                        snc = self._session_network_context
+                        
+                    
+                    self.engine.session_manager.SetSessionDirty( snc )
                     
                     if response is not None:
                         

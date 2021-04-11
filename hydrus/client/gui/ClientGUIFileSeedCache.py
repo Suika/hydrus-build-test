@@ -15,7 +15,6 @@ from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSerialisable
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIMenus
@@ -25,6 +24,7 @@ from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.importing import ClientImportFileSeeds
 from hydrus.client.importing import ClientImportOptions
 
@@ -747,8 +747,8 @@ class FileSeedCacheStatusControl( QW.QFrame ):
         
         if self._file_seed_cache is None:
             
-            self._import_summary_st.setText( '' )
-            self._progress_st.setText( '' )
+            self._import_summary_st.clear()
+            self._progress_st.clear()
             self._progress_gauge.SetRange( 1 )
             self._progress_gauge.SetValue( 0 )
             
@@ -767,7 +767,7 @@ class FileSeedCacheStatusControl( QW.QFrame ):
             
             if num_to_do == 0:
                 
-                self._progress_st.setText( '' )
+                self._progress_st.clear()
                 
             else:
                 

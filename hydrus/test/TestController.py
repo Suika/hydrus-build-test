@@ -58,6 +58,7 @@ from hydrus.test import TestClientTags
 from hydrus.test import TestClientThreading
 from hydrus.test import TestDialogs
 from hydrus.test import TestFunctions
+from hydrus.test import TestHydrusData
 from hydrus.test import TestHydrusNATPunch
 from hydrus.test import TestHydrusNetworking
 from hydrus.test import TestHydrusSerialisable
@@ -168,6 +169,7 @@ class Controller( object ):
     
     def __init__( self, win, only_run ):
         
+        self.app = win
         self.win = win
         self.only_run = only_run
         
@@ -252,7 +254,7 @@ class Controller( object ):
         self._reads[ 'sessions' ] = []
         self._reads[ 'tag_parents' ] = {}
         self._reads[ 'tag_siblings_all_ideals' ] = {}
-        self._reads[ 'in_inbox' ] = False
+        self._reads[ 'inbox_hashes' ] = set()
         
         self._writes = collections.defaultdict( list )
         
@@ -700,6 +702,7 @@ class Controller( object ):
             TestServerDB,
             TestClientDBDuplicates,
             TestClientDBTags,
+            TestHydrusData,
             TestHydrusNATPunch,
             TestClientNetworking,
             TestHydrusNetworking,
@@ -730,13 +733,26 @@ class Controller( object ):
             TestClientTags,
             TestClientThreading,
             TestFunctions,
+            TestHydrusData,
             TestHydrusSerialisable,
             TestHydrusSessions
         ]
-            
+        
+        module_lookup[ 'tags_fast' ] = [
+            TestClientTags
+        ]
+        
         module_lookup[ 'tags' ] = [
             TestClientTags,
             TestClientDBTags
+        ]
+        
+        module_lookup[ 'client_db' ] = [
+            TestClientDB
+        ]
+        
+        module_lookup[ 'server_db' ] = [
+            TestServerDB
         ]
         
         module_lookup[ 'db' ] = [
@@ -787,6 +803,8 @@ class Controller( object ):
         suite = unittest.TestSuite( suites )
         
         runner = unittest.TextTestRunner( verbosity = 2 )
+        
+        runner.failfast = True
         
         def do_it():
             

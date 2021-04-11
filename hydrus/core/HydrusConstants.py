@@ -50,11 +50,20 @@ DEFAULT_DB_DIR = os.path.join( BASE_DIR, 'db' )
 
 if PLATFORM_MACOS:
     
-    USERPATH_DB_DIR = os.path.join( os.path.expanduser( '~' ), 'Library', 'Hydrus' )
+    desired_userpath_db_dir = os.path.join( '~', 'Library', 'Hydrus' )
     
 else:
     
-    USERPATH_DB_DIR = os.path.join( os.path.expanduser( '~' ), 'Hydrus' )
+    desired_userpath_db_dir = os.path.join( '~', 'Hydrus' )
+    
+
+USERPATH_DB_DIR = os.path.expanduser( desired_userpath_db_dir )
+
+if USERPATH_DB_DIR == desired_userpath_db_dir:
+    
+    # could not figure it out, probably a crazy user situation atm
+    
+    USERPATH_DB_DIR = None
     
 
 LICENSE_PATH = os.path.join( BASE_DIR, 'license.txt' )
@@ -69,15 +78,14 @@ options = {}
 
 # Misc
 
-NETWORK_VERSION = 19
-SOFTWARE_VERSION = 419
+NETWORK_VERSION = 20
+SOFTWARE_VERSION = 434
 CLIENT_API_VERSION = 15
 
 SERVER_THUMBNAIL_DIMENSIONS = ( 200, 200 )
 
 HYDRUS_KEY_LENGTH = 32
 
-UPDATE_DURATION = 100000
 READ_BLOCK_SIZE = 256 * 1024
 
 lifetimes = [ ( 'one month', 31 * 86400 ), ( 'three months', 3 * 31 * 86400 ), ( 'six months', 6 * 31 * 86400 ), ( 'one year', 12 * 31 * 86400 ), ( 'two years', 24 * 31 * 86400 ), ( 'five years', 60 * 31 * 86400 ), ( 'does not expire', None ) ]
@@ -139,6 +147,7 @@ CONTENT_TYPE_TIMESTAMP = 16
 CONTENT_TYPE_TITLE = 17
 CONTENT_TYPE_NOTES = 18
 CONTENT_TYPE_FILE_VIEWING_STATS = 19
+CONTENT_TYPE_TAG = 20
 
 content_type_string_lookup = {}
 
@@ -251,6 +260,9 @@ IMPORT_FOLDER_TYPE_SYNCHRONISE = 1
 EXPORT_FOLDER_TYPE_REGULAR = 0
 EXPORT_FOLDER_TYPE_SYNCHRONISE = 1
 
+FILTER_WHITELIST = 0
+FILTER_BLACKLIST = 1
+
 HAMMING_EXACT_MATCH = 0
 HAMMING_VERY_SIMILAR = 2
 HAMMING_SIMILAR = 4
@@ -299,37 +311,37 @@ permissions_string_lookup[ UNKNOWN_PERMISSION ] = 'unknown'
 
 PERMISSION_ACTION_PETITION = 0
 PERMISSION_ACTION_CREATE = 1
-PERMISSION_ACTION_OVERRULE = 2
+PERMISSION_ACTION_MODERATE = 2
 
 permission_pair_string_lookup = {}
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNTS, None ) ] = 'cannot change accounts'
 permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNTS, PERMISSION_ACTION_CREATE ) ] = 'can create accounts'
-permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNTS, PERMISSION_ACTION_OVERRULE ) ] = 'can manage accounts completely'
+permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNTS, PERMISSION_ACTION_MODERATE ) ] = 'can manage accounts completely'
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNT_TYPES, None ) ] = 'cannot change account types'
-permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNT_TYPES, PERMISSION_ACTION_OVERRULE ) ] = 'can manage account types completely'
+permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNT_TYPES, PERMISSION_ACTION_MODERATE ) ] = 'can manage account types completely'
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_SERVICES, None ) ] = 'cannot change services'
-permission_pair_string_lookup[ ( CONTENT_TYPE_SERVICES, PERMISSION_ACTION_OVERRULE ) ] = 'can manage services completely'
+permission_pair_string_lookup[ ( CONTENT_TYPE_SERVICES, PERMISSION_ACTION_MODERATE ) ] = 'can manage services completely'
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_FILES, None ) ] = 'can only download files'
 permission_pair_string_lookup[ ( CONTENT_TYPE_FILES, PERMISSION_ACTION_PETITION ) ] = 'can petition to remove existing files'
 permission_pair_string_lookup[ ( CONTENT_TYPE_FILES, PERMISSION_ACTION_CREATE ) ] = 'can upload new files and petition existing ones'
-permission_pair_string_lookup[ ( CONTENT_TYPE_FILES, PERMISSION_ACTION_OVERRULE ) ] = 'can upload and delete files and process petitions'
+permission_pair_string_lookup[ ( CONTENT_TYPE_FILES, PERMISSION_ACTION_MODERATE ) ] = 'can upload and delete files and process petitions'
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_MAPPINGS, None ) ] = 'can only download mappings'
 permission_pair_string_lookup[ ( CONTENT_TYPE_MAPPINGS, PERMISSION_ACTION_PETITION ) ] = 'can petition to remove existing mappings'
 permission_pair_string_lookup[ ( CONTENT_TYPE_MAPPINGS, PERMISSION_ACTION_CREATE ) ] = 'can upload new mappings and petition existing ones'
-permission_pair_string_lookup[ ( CONTENT_TYPE_MAPPINGS, PERMISSION_ACTION_OVERRULE ) ] = 'can upload and delete mappings and process petitions'
+permission_pair_string_lookup[ ( CONTENT_TYPE_MAPPINGS, PERMISSION_ACTION_MODERATE ) ] = 'can upload and delete mappings and process petitions'
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_PARENTS, None ) ] = 'can only download tag parents'
 permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_PARENTS, PERMISSION_ACTION_PETITION ) ] = 'can petition to add or remove tag parents'
-permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_PARENTS, PERMISSION_ACTION_OVERRULE ) ] = 'can upload and delete tag parents and process petitions'
+permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_PARENTS, PERMISSION_ACTION_MODERATE ) ] = 'can upload and delete tag parents and process petitions'
 
 permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_SIBLINGS, None ) ] = 'can only download tag siblings'
 permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_SIBLINGS, PERMISSION_ACTION_PETITION ) ] = 'can petition to add or remove tag siblings'
-permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_SIBLINGS, PERMISSION_ACTION_OVERRULE ) ] = 'can upload and delete tag siblings and process petitions'
+permission_pair_string_lookup[ ( CONTENT_TYPE_TAG_SIBLINGS, PERMISSION_ACTION_MODERATE ) ] = 'can upload and delete tag siblings and process petitions'
 
 TAG_REPOSITORY = 0
 FILE_REPOSITORY = 1
@@ -390,6 +402,7 @@ ADDREMOVABLE_SERVICES = ( LOCAL_TAG, LOCAL_RATING_LIKE, LOCAL_RATING_NUMERICAL, 
 MUST_HAVE_AT_LEAST_ONE_SERVICES = ( LOCAL_TAG, )
 NONEDITABLE_SERVICES = ( LOCAL_FILE_DOMAIN, LOCAL_FILE_TRASH_DOMAIN, COMBINED_FILE, COMBINED_TAG, COMBINED_LOCAL_FILE )
 AUTOCOMPLETE_CACHE_SPECIFIC_FILE_SERVICES = ( LOCAL_FILE_DOMAIN, LOCAL_FILE_TRASH_DOMAIN, COMBINED_LOCAL_FILE, FILE_REPOSITORY )
+TAG_CACHE_SPECIFIC_FILE_SERVICES = ( COMBINED_LOCAL_FILE, FILE_REPOSITORY )
 ALL_SERVICES = REMOTE_SERVICES + LOCAL_SERVICES + ( COMBINED_FILE, COMBINED_TAG )
 
 SERVICES_WITH_THUMBNAILS = [ FILE_REPOSITORY, LOCAL_FILE_DOMAIN ]
@@ -399,9 +412,6 @@ DELETE_TAG_PETITION = 1
 
 BAN = 0
 SUPERBAN = 1
-CHANGE_ACCOUNT_TYPE = 2
-ADD_TO_EXPIRES = 3
-SET_EXPIRES = 4
 
 SCORE_PETITION = 0
 
@@ -497,12 +507,13 @@ GENERAL_IMAGE = 41
 GENERAL_VIDEO = 42
 GENERAL_APPLICATION = 43
 GENERAL_ANIMATION = 44
+APPLICATION_CLIP = 45
 APPLICATION_OCTET_STREAM = 100
 APPLICATION_UNKNOWN = 101
 
 GENERAL_FILETYPES = { GENERAL_APPLICATION, GENERAL_AUDIO, GENERAL_IMAGE, GENERAL_VIDEO, GENERAL_ANIMATION }
 
-SEARCHABLE_MIMES = { IMAGE_JPEG, IMAGE_PNG, IMAGE_APNG, IMAGE_GIF, IMAGE_WEBP, IMAGE_TIFF, IMAGE_ICON, APPLICATION_FLASH, VIDEO_AVI, VIDEO_FLV, VIDEO_MOV, VIDEO_MP4, VIDEO_MKV, VIDEO_REALMEDIA, VIDEO_WEBM, VIDEO_MPEG, APPLICATION_PSD, APPLICATION_PDF, APPLICATION_ZIP, APPLICATION_RAR, APPLICATION_7Z, AUDIO_M4A, AUDIO_MP3, AUDIO_REALMEDIA, AUDIO_OGG, AUDIO_FLAC, AUDIO_TRUEAUDIO, AUDIO_WMA, VIDEO_WMV }
+SEARCHABLE_MIMES = { IMAGE_JPEG, IMAGE_PNG, IMAGE_APNG, IMAGE_GIF, IMAGE_WEBP, IMAGE_TIFF, IMAGE_ICON, APPLICATION_FLASH, VIDEO_AVI, VIDEO_FLV, VIDEO_MOV, VIDEO_MP4, VIDEO_MKV, VIDEO_REALMEDIA, VIDEO_WEBM, VIDEO_MPEG, APPLICATION_CLIP, APPLICATION_PSD, APPLICATION_PDF, APPLICATION_ZIP, APPLICATION_RAR, APPLICATION_7Z, AUDIO_M4A, AUDIO_MP3, AUDIO_REALMEDIA, AUDIO_OGG, AUDIO_FLAC, AUDIO_TRUEAUDIO, AUDIO_WMA, VIDEO_WMV }
 
 STORABLE_MIMES = set( SEARCHABLE_MIMES ).union( { APPLICATION_HYDRUS_UPDATE_CONTENT, APPLICATION_HYDRUS_UPDATE_DEFINITIONS } )
 
@@ -518,7 +529,7 @@ AUDIO = ( AUDIO_M4A, AUDIO_MP3, AUDIO_OGG, AUDIO_FLAC, AUDIO_WMA, AUDIO_REALMEDI
 
 VIDEO = ( VIDEO_AVI, VIDEO_FLV, VIDEO_MOV, VIDEO_MP4, VIDEO_WMV, VIDEO_MKV, VIDEO_REALMEDIA, VIDEO_WEBM, VIDEO_MPEG )
 
-APPLICATIONS = ( APPLICATION_FLASH, APPLICATION_PSD, APPLICATION_PDF, APPLICATION_ZIP, APPLICATION_RAR, APPLICATION_7Z )
+APPLICATIONS = ( APPLICATION_FLASH, APPLICATION_PSD, APPLICATION_CLIP, APPLICATION_PDF, APPLICATION_ZIP, APPLICATION_RAR, APPLICATION_7Z )
 
 general_mimetypes_to_mime_groups = {}
 
@@ -568,6 +579,7 @@ mime_enum_lookup[ 'image' ] = IMAGES
 mime_enum_lookup[ 'application/x-shockwave-flash' ] = APPLICATION_FLASH
 mime_enum_lookup[ 'application/x-photoshop' ] = APPLICATION_PSD
 mime_enum_lookup[ 'image/vnd.adobe.photoshop' ] = APPLICATION_PSD
+mime_enum_lookup[ 'application/clip' ] = APPLICATION_CLIP
 mime_enum_lookup[ 'application/octet-stream' ] = APPLICATION_OCTET_STREAM
 mime_enum_lookup[ 'application/x-yaml' ] = APPLICATION_YAML
 mime_enum_lookup[ 'PDF document' ] = APPLICATION_PDF
@@ -619,6 +631,7 @@ mime_string_lookup[ APPLICATION_YAML ] = 'yaml'
 mime_string_lookup[ APPLICATION_JSON ] = 'json'
 mime_string_lookup[ APPLICATION_PDF ] = 'pdf'
 mime_string_lookup[ APPLICATION_PSD ] = 'photoshop psd'
+mime_string_lookup[ APPLICATION_CLIP ] = 'clip'
 mime_string_lookup[ APPLICATION_ZIP ] = 'zip'
 mime_string_lookup[ APPLICATION_RAR ] = 'rar'
 mime_string_lookup[ APPLICATION_7Z ] = '7z'
@@ -668,6 +681,7 @@ mime_mimetype_string_lookup[ APPLICATION_YAML ] = 'application/x-yaml'
 mime_mimetype_string_lookup[ APPLICATION_JSON ] = 'application/json'
 mime_mimetype_string_lookup[ APPLICATION_PDF ] = 'application/pdf'
 mime_mimetype_string_lookup[ APPLICATION_PSD ] = 'application/x-photoshop'
+mime_mimetype_string_lookup[ APPLICATION_CLIP ] = 'application/clip'
 mime_mimetype_string_lookup[ APPLICATION_ZIP ] = 'application/zip'
 mime_mimetype_string_lookup[ APPLICATION_RAR ] = 'application/vnd.rar'
 mime_mimetype_string_lookup[ APPLICATION_7Z ] = 'application/x-7z-compressed'
@@ -717,6 +731,7 @@ mime_ext_lookup[ APPLICATION_YAML ] = '.yaml'
 mime_ext_lookup[ APPLICATION_JSON ] = '.json'
 mime_ext_lookup[ APPLICATION_PDF ] = '.pdf'
 mime_ext_lookup[ APPLICATION_PSD ] = '.psd'
+mime_ext_lookup[ APPLICATION_CLIP ] = '.clip'
 mime_ext_lookup[ APPLICATION_ZIP ] = '.zip'
 mime_ext_lookup[ APPLICATION_RAR ] = '.rar'
 mime_ext_lookup[ APPLICATION_7Z ] = '.7z'

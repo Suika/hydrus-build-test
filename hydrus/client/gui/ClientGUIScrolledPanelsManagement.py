@@ -19,8 +19,6 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
-from hydrus.client.gui import ClientGUICommon
-from hydrus.client.gui import ClientGUIControls
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
@@ -30,6 +28,8 @@ from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIScrolledPanelsEdit
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import ClientGUIStyle
+from hydrus.client.gui import ClientGUITags
+from hydrus.client.gui import ClientGUITagSorting
 from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
@@ -38,7 +38,10 @@ from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.search import ClientGUIACDropdown
 from hydrus.client.gui.search import ClientGUISearch
+from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.gui.widgets import ClientGUIControls
 from hydrus.client.media import ClientMedia
+from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientNetworkingSessions
 
 class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
@@ -74,6 +77,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         self._listbook.AddPage( 'tag suggestions', 'tag suggestions', self._TagSuggestionsPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'tags', 'tags', self._TagsPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'thumbnails', 'thumbnails', self._ThumbnailsPanel( self._listbook, self._new_options ) )
+        self._listbook.AddPage( 'system', 'system', self._SystemPanel( self._listbook, self._new_options ) )
         
         #
         
@@ -924,9 +928,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._prefix_hash_when_copying = QW.QCheckBox( self )
             self._prefix_hash_when_copying.setToolTip( 'If you often paste hashes into boorus, check this to automatically prefix with the type, like "md5:2496dabcbd69e3c56a5d8caabb7acde5".' )
             
-            self._file_system_waits_on_wakeup = QW.QCheckBox( self )
-            self._file_system_waits_on_wakeup.setToolTip( 'This is useful if your hydrus is stored on a NAS that takes a few seconds to get going after your machine resumes from sleep.' )
-            
             self._delete_to_recycle_bin = QW.QCheckBox( self )
             
             self._confirm_trash = QW.QCheckBox( self )
@@ -959,8 +960,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._prefix_hash_when_copying.setChecked( self._new_options.GetBoolean( 'prefix_hash_when_copying' ) )
             
-            self._file_system_waits_on_wakeup.setChecked( self._new_options.GetBoolean( 'file_system_waits_on_wakeup' ) )
-            
             self._delete_to_recycle_bin.setChecked( HC.options[ 'delete_to_recycle_bin' ] )
             
             self._confirm_trash.setChecked( HC.options[ 'confirm_trash' ] )
@@ -991,7 +990,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows = []
             
             rows.append( ( 'When copying a file hashes, prefix with booru-friendly hash type: ', self._prefix_hash_when_copying ) )
-            rows.append( ( 'Wait 15s after computer resume before accessing files: ', self._file_system_waits_on_wakeup ) )
             rows.append( ( 'Confirm sending files to trash: ', self._confirm_trash ) )
             rows.append( ( 'Confirm sending more than one file to archive or inbox: ', self._confirm_archive ) )
             rows.append( ( 'When deleting files or folders, send them to the OS\'s recycle bin: ', self._delete_to_recycle_bin ) )
@@ -1060,7 +1058,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             HC.options[ 'export_path' ] = HydrusPaths.ConvertAbsPathToPortablePath( self._export_location.GetPath() )
             
             self._new_options.SetBoolean( 'prefix_hash_when_copying', self._prefix_hash_when_copying.isChecked() )
-            self._new_options.SetBoolean( 'file_system_waits_on_wakeup', self._file_system_waits_on_wakeup.isChecked() )
             
             HC.options[ 'delete_to_recycle_bin' ] = self._delete_to_recycle_bin.isChecked()
             HC.options[ 'confirm_trash' ] = self._confirm_trash.isChecked()
@@ -1189,6 +1186,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._discord_dnd_fix = QW.QCheckBox( self._misc_panel )
             self._discord_dnd_fix.setToolTip( 'This makes small file drag-and-drops a little laggier in exchange for discord support.' )
             
+            self._discord_dnd_filename_pattern = QW.QLineEdit( self._misc_panel )
+            self._discord_dnd_filename_pattern.setToolTip( 'When discord DnD is enabled, this will use this export phrase to rename your files. If no filename can be generated, hash will be used instead.' )
+            
             self._secret_discord_dnd_fix = QW.QCheckBox( self._misc_panel )
             self._secret_discord_dnd_fix.setToolTip( 'This saves the lag but is potentially dangerous, as it (may) treat the from-db-files-drag as a move rather than a copy and hence only works when the drop destination will not consume the files. It requires an additional secret Alternate key to unlock.' )
             
@@ -1224,6 +1224,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._popup_message_force_min_width.setChecked( self._new_options.GetBoolean( 'popup_message_force_min_width' ) )
             
             self._discord_dnd_fix.setChecked( self._new_options.GetBoolean( 'discord_dnd_fix' ) )
+            
+            self._discord_dnd_filename_pattern.setText( self._new_options.GetString( 'discord_dnd_filename_pattern' ) )
             
             self._secret_discord_dnd_fix.setChecked( self._new_options.GetBoolean( 'secret_discord_dnd_fix' ) )
             
@@ -1271,6 +1273,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'Prefer ISO time ("2018-03-01 12:40:23") to "5 days ago": ', self._always_show_iso_time ) )
             rows.append( ( 'BUGFIX: Force this width as the minimum width for all popup messages: ', self._popup_message_force_min_width ) )
             rows.append( ( 'BUGFIX: Discord file drag-and-drop fix (works for <=25, <200MB file DnDs): ', self._discord_dnd_fix ) )
+            rows.append( ( 'Discord drag-and-drop filename pattern: ', self._discord_dnd_filename_pattern ) )
+            rows.append( ( 'Export pattern shortcuts: ', ClientGUICommon.ExportPatternButton( self ) ) )
             rows.append( ( 'EXPERIMENTAL BUGFIX: Secret discord file drag-and-drop fix: ', self._secret_discord_dnd_fix ) )
             rows.append( ( 'ANTI-CRASH BUGFIX: Use Qt file/directory selection dialogs, rather than OS native: ', self._use_qt_file_dialogs ) )
             
@@ -1350,6 +1354,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options.SetBoolean( 'notify_client_api_cookies', self._notify_client_api_cookies.isChecked() )
             self._new_options.SetBoolean( 'discord_dnd_fix', self._discord_dnd_fix.isChecked() )
+            self._new_options.SetString( 'discord_dnd_filename_pattern', self._discord_dnd_filename_pattern.text() )
             self._new_options.SetBoolean( 'secret_discord_dnd_fix', self._secret_discord_dnd_fix.isChecked() )
             self._new_options.SetBoolean( 'hide_message_manager_on_gui_iconise', self._hide_message_manager_on_gui_iconise.isChecked() )
             self._new_options.SetBoolean( 'hide_message_manager_on_gui_deactive', self._hide_message_manager_on_gui_deactive.isChecked() )
@@ -1385,6 +1390,10 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._number_of_gui_session_backups = QP.MakeQSpinBox( self._sessions_panel, min = 1, max = 32 )
             
             self._number_of_gui_session_backups.setToolTip( 'The client keeps multiple rolling backups of your gui sessions. If you have very large sessions, you might like to reduce this number.' )
+            
+            self._show_session_size_warnings = QW.QCheckBox( self._sessions_panel )
+            
+            self._show_session_size_warnings.setToolTip( 'This will give you a once-per-boot warning popup if your active session contains more than 500k objects.' )
             
             #
             
@@ -1470,6 +1479,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._number_of_gui_session_backups.setValue( self._new_options.GetInteger( 'number_of_gui_session_backups' ) )
             
+            self._show_session_size_warnings.setChecked( self._new_options.GetBoolean( 'show_session_size_warnings' ) )
+            
             self._default_new_page_goes.SetValue( self._new_options.GetInteger( 'default_new_page_goes' ) )
             
             self._notebook_tab_alignment.SetValue( self._new_options.GetInteger( 'notebook_tab_alignment' ) )
@@ -1504,6 +1515,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'If \'last session\' above, autosave it how often (minutes)?', self._last_session_save_period_minutes ) )
             rows.append( ( 'If \'last session\' above, only autosave during idle time?', self._only_save_last_session_during_idle ) )
             rows.append( ( 'Number of session backups to keep: ', self._number_of_gui_session_backups ) )
+            rows.append( ( 'Show warning popup if session size exceeds 500k: ', self._show_session_size_warnings ) )
             
             sessions_gridbox = ClientGUICommon.WrapInGrid( self._sessions_panel, rows )
             
@@ -1511,7 +1523,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows = []
             
-            rows.append( ( 'By default, put new page tabs on (requires restart): ', self._default_new_page_goes ) )
+            rows.append( ( 'By default, put new page tabs on: ', self._default_new_page_goes ) )
             rows.append( ( 'Notebook tab alignment: ', self._notebook_tab_alignment ) )
             rows.append( ( 'Reverse page tab shift-drag behaviour: ', self._reverse_page_shift_drag_behaviour ) )
             rows.append( ( 'Warn at this many total pages: ', self._total_pages_warning ) )
@@ -1578,6 +1590,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetInteger( 'last_session_save_period_minutes', self._last_session_save_period_minutes.value() )
             
             self._new_options.SetInteger( 'number_of_gui_session_backups', self._number_of_gui_session_backups.value() )
+            
+            self._new_options.SetBoolean( 'show_session_size_warnings', self._show_session_size_warnings.isChecked() )
             
             self._new_options.SetBoolean( 'only_save_last_session_during_idle', self._only_save_last_session_during_idle.isChecked() )
             
@@ -2474,19 +2488,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options = new_options
             
-            disk_panel = ClientGUICommon.StaticBox( self, 'disk cache' )
-            
-            disk_cache_help_button = ClientGUICommon.BetterBitmapButton( disk_panel, CC.global_pixmaps().help, self._ShowDiskCacheHelp )
-            disk_cache_help_button.setToolTip( 'Show help regarding the disk cache.' )
-            
-            help_hbox = ClientGUICommon.WrapInText( disk_cache_help_button, disk_panel, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
-            
-            self._disk_cache_init_period = ClientGUICommon.NoneableSpinCtrl( disk_panel, unit = 's', none_phrase = 'do not run', min = 1, max = 120 )
-            self._disk_cache_init_period.setToolTip( 'When the client boots, it can speed up operation (particularly loading your session pages) by reading the front of its database into memory. This sets the max number of seconds it can spend doing that.' )
-            
-            self._disk_cache_maintenance = ClientGUIControls.NoneableBytesControl( disk_panel, initial_value = 256 * 1024 * 1024, none_label = 'do not keep db cached' )
-            self._disk_cache_maintenance.setToolTip( 'The client can regularly ensure the front of its database is cached in your OS\'s disk cache. This represents how many megabytes it will ensure are cached in memory.' )
-            
             #
             
             media_panel = ClientGUICommon.StaticBox( self, 'thumbnail size and media cache' )
@@ -2518,35 +2519,11 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             #
             
-            ac_panel = ClientGUICommon.StaticBox( self, 'tag autocomplete' )
-            
-            self._autocomplete_results_fetch_automatically = QW.QCheckBox( ac_panel )
-            
-            self._autocomplete_exact_match_threshold = ClientGUICommon.NoneableSpinCtrl( ac_panel, none_phrase = 'always do full search', min = 1, max = 1024 )
-            self._autocomplete_exact_match_threshold.setToolTip( 'If the search input has this many characters or fewer, it will fetch exact results rather than full autocomplete results.' )
-            
-            #
-            
             misc_panel = ClientGUICommon.StaticBox( self, 'misc' )
             
             self._forced_search_limit = ClientGUICommon.NoneableSpinCtrl( misc_panel, '', min = 1, max = 100000 )
             
             #
-            
-            self._disk_cache_init_period.SetValue( self._new_options.GetNoneableInteger( 'disk_cache_init_period' ) )
-            
-            disk_cache_maintenance_mb = self._new_options.GetNoneableInteger( 'disk_cache_maintenance_mb' )
-            
-            if disk_cache_maintenance_mb is None:
-                
-                disk_cache_maintenance = disk_cache_maintenance_mb
-                
-            else:
-                
-                disk_cache_maintenance = disk_cache_maintenance_mb * 1024 * 1024
-                
-            
-            self._disk_cache_maintenance.SetValue( disk_cache_maintenance )
             
             self._thumbnail_cache_size.setValue( int( HC.options['thumbnail_cache_size'] // 1048576 ) )
             
@@ -2557,27 +2534,11 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._video_buffer_size_mb.setValue( self._new_options.GetInteger( 'video_buffer_size_mb' ) )
             
-            self._autocomplete_results_fetch_automatically.setChecked( self._new_options.GetBoolean( 'autocomplete_results_fetch_automatically' ) )
-            
-            self._autocomplete_exact_match_threshold.SetValue( self._new_options.GetNoneableInteger( 'autocomplete_exact_match_threshold' ) )
-            
             self._forced_search_limit.SetValue( self._new_options.GetNoneableInteger( 'forced_search_limit' ) )
             
             #
             
-            rows = []
-            
-            rows.append( ( 'run disk cache on boot for this long: ', self._disk_cache_init_period ) )
-            rows.append( ( 'regularly ensure this much of the db is in OS\'s disk cache: ', self._disk_cache_maintenance ) )
-            
-            gridbox = ClientGUICommon.WrapInGrid( disk_panel, rows )
-            
             vbox = QP.VBoxLayout()
-            
-            disk_panel.Add( help_hbox, CC.FLAGS_ON_RIGHT )
-            disk_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-            
-            QP.AddToLayout( vbox, disk_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
             
             #
             
@@ -2633,23 +2594,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             #
             
-            text = 'If you disable automatic autocomplete results fetching, use Ctrl+Space to fetch results manually.'
-            
-            ac_panel.Add( QW.QLabel( text, ac_panel ), CC.FLAGS_EXPAND_PERPENDICULAR )
-            
-            rows = []
-            
-            rows.append( ( 'Automatically fetch autocomplete results: ', self._autocomplete_results_fetch_automatically ) )
-            rows.append( ( 'Fetch exact match results if input has <= this many characters: ', self._autocomplete_exact_match_threshold ) )
-            
-            gridbox = ClientGUICommon.WrapInGrid( ac_panel, rows )
-            
-            ac_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-            
-            QP.AddToLayout( vbox, ac_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
-            
-            #
-            
             rows = []
             
             rows.append( ( 'Forced system:limit for all searches: ', self._forced_search_limit ) )
@@ -2671,21 +2615,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self.EventFullscreensUpdate( self._fullscreen_cache_size.value() )
             self.EventThumbnailsUpdate( self._thumbnail_cache_size.value() )
             self.EventVideoBufferUpdate( self._video_buffer_size_mb.value() )
-            
-        
-        def _ShowDiskCacheHelp( self ):
-            
-            message = 'NO NEED TO USE THESE IF YOU RUN ON AN SSD.'
-            message += os.linesep * 2
-            message += 'The hydrus database runs best on a drive with fast random access latency. Certain important operations can function up to 100 times faster when started raw from an SSD rather than an HDD.'
-            message += os.linesep * 2
-            message += 'If you are on an HDD, the client can populate a pre-boot and ongoing disk cache. By contiguously frontloading the database into memory, the most important functions do not need to wait on your disk for most of their work.'
-            message += os.linesep * 2
-            message += 'Try 2 to 10 seconds boot cache, and 256-512MB ongoing disk cache.'
-            message += os.linesep * 2
-            message += 'Unless you are testing, do not go crazy with this stuff. You can set 8192MB if you like, but there are diminishing (and potentially negative) returns.'
-            
-            QW.QMessageBox.information( self, 'Information', message )
             
         
         def EventFullscreensUpdate( self, value ):
@@ -2721,21 +2650,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         def UpdateOptions( self ):
             
-            self._new_options.SetNoneableInteger( 'disk_cache_init_period', self._disk_cache_init_period.GetValue() )
-            
-            disk_cache_maintenance = self._disk_cache_maintenance.GetValue()
-            
-            if disk_cache_maintenance is None:
-                
-                disk_cache_maintenance_mb = disk_cache_maintenance
-                
-            else:
-                
-                disk_cache_maintenance_mb = disk_cache_maintenance // ( 1024 * 1024 )
-                
-            
-            self._new_options.SetNoneableInteger( 'disk_cache_maintenance_mb', disk_cache_maintenance_mb )
-            
             HC.options[ 'thumbnail_cache_size' ] = self._thumbnail_cache_size.value() * 1048576
             HC.options[ 'fullscreen_cache_size' ] = self._fullscreen_cache_size.value() * 1048576
             
@@ -2745,9 +2659,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetInteger( 'video_buffer_size_mb', self._video_buffer_size_mb.value() )
             
             self._new_options.SetNoneableInteger( 'forced_search_limit', self._forced_search_limit.GetValue() )
-            
-            self._new_options.SetBoolean( 'autocomplete_results_fetch_automatically', self._autocomplete_results_fetch_automatically.isChecked() )
-            self._new_options.SetNoneableInteger( 'autocomplete_exact_match_threshold', self._autocomplete_exact_match_threshold.GetValue() )
             
         
     
@@ -2869,6 +2780,61 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
         
     
+    class _SystemPanel( QW.QWidget ):
+        
+        def __init__( self, parent, new_options ):
+            
+            QW.QWidget.__init__( self, parent )
+            
+            self._new_options = new_options
+            
+            #
+            
+            sleep_panel = ClientGUICommon.StaticBox( self, 'system sleep' )
+            
+            self._wake_delay_period = QP.MakeQSpinBox( sleep_panel, min = 0, max = 60 )
+            
+            tt = 'It sometimes takes a few seconds for your network adapter to reconnect after a wake. This adds a grace period after a detected wake-from-sleep to allow your OS to sort that out before Hydrus starts making requests.'
+            
+            self._wake_delay_period.setToolTip( tt )
+            
+            self._file_system_waits_on_wakeup = QW.QCheckBox( sleep_panel )
+            self._file_system_waits_on_wakeup.setToolTip( 'This is useful if your hydrus is stored on a NAS that takes a few seconds to get going after your machine resumes from sleep.' )
+            
+            #
+            
+            self._wake_delay_period.setValue( self._new_options.GetInteger( 'wake_delay_period' ) )
+            
+            self._file_system_waits_on_wakeup.setChecked( self._new_options.GetBoolean( 'file_system_waits_on_wakeup' ) )
+            
+            #
+            
+            rows = []
+            
+            rows.append( ( 'After a wake from system sleep, wait this many seconds before allowing new network access:', self._wake_delay_period ) )
+            rows.append( ( 'Include the file system in this wait: ', self._file_system_waits_on_wakeup ) )
+            
+            gridbox = ClientGUICommon.WrapInGrid( sleep_panel, rows )
+            
+            sleep_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+            
+            #
+            
+            vbox = QP.VBoxLayout()
+            
+            QP.AddToLayout( vbox, sleep_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+            vbox.addStretch( 1 )
+            
+            self.setLayout( vbox )
+            
+        
+        def UpdateOptions( self ):
+            
+            self._new_options.SetInteger( 'wake_delay_period', self._wake_delay_period.value() )
+            self._new_options.SetBoolean( 'file_system_waits_on_wakeup', self._file_system_waits_on_wakeup.isChecked() )
+            
+        
+    
     class _SystemTrayPanel( QW.QWidget ):
         
         def __init__( self, parent, new_options ):
@@ -2959,23 +2925,14 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             general_panel = ClientGUICommon.StaticBox( self, 'general tag options' )
             
-            self._default_tag_sort = ClientGUICommon.BetterChoice( general_panel )
-            
-            self._default_tag_sort.addItem( 'lexicographic (a-z)', CC.SORT_BY_LEXICOGRAPHIC_ASC )
-            self._default_tag_sort.addItem( 'lexicographic (z-a)', CC.SORT_BY_LEXICOGRAPHIC_DESC )
-            self._default_tag_sort.addItem( 'lexicographic (a-z) (group unnamespaced)', CC.SORT_BY_LEXICOGRAPHIC_NAMESPACE_ASC )
-            self._default_tag_sort.addItem( 'lexicographic (z-a) (group unnamespaced)', CC.SORT_BY_LEXICOGRAPHIC_NAMESPACE_DESC )
-            self._default_tag_sort.addItem( 'lexicographic (a-z) (ignore namespace)', CC.SORT_BY_LEXICOGRAPHIC_IGNORE_NAMESPACE_ASC )
-            self._default_tag_sort.addItem( 'lexicographic (z-a) (ignore namespace)', CC.SORT_BY_LEXICOGRAPHIC_IGNORE_NAMESPACE_DESC )
-            self._default_tag_sort.addItem( 'incidence (desc)', CC.SORT_BY_INCIDENCE_DESC )
-            self._default_tag_sort.addItem( 'incidence (asc)', CC.SORT_BY_INCIDENCE_ASC )
-            self._default_tag_sort.addItem( 'incidence (desc) (grouped by namespace)', CC.SORT_BY_INCIDENCE_NAMESPACE_DESC )
-            self._default_tag_sort.addItem( 'incidence (asc) (grouped by namespace)', CC.SORT_BY_INCIDENCE_NAMESPACE_ASC )
+            self._default_tag_sort = ClientGUITagSorting.TagSortControl( general_panel, self._new_options.GetDefaultTagSort(), show_siblings = True )
             
             self._default_tag_repository = ClientGUICommon.BetterChoice( general_panel )
             
             self._default_tag_service_search_page = ClientGUICommon.BetterChoice( general_panel )
             
+            self._expand_parents_on_storage_taglists = QW.QCheckBox( general_panel )
+            self._expand_parents_on_storage_autocomplete_taglists = QW.QCheckBox( general_panel )
             self._ac_select_first_with_count = QW.QCheckBox( general_panel )
             
             #
@@ -2987,14 +2944,10 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             favourites_st = ClientGUICommon.BetterStaticText( favourites_panel, desc )
             favourites_st.setWordWrap( True )
             
-            expand_parents = False
-            
-            self._favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( favourites_panel, show_display_decorators = False )
-            self._favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( favourites_panel, self._favourites.AddTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
+            self._favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( favourites_panel, CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE )
+            self._favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( favourites_panel, self._favourites.AddTags, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
             
             #
-            
-            self._default_tag_sort.SetValue( HC.options[ 'default_tag_sort' ] )
             
             self._default_tag_service_search_page.addItem( 'all known tags', CC.COMBINED_TAG_SERVICE_KEY )
             
@@ -3013,6 +2966,14 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._default_tag_service_search_page.SetValue( new_options.GetKey( 'default_tag_service_search_page' ) )
             
+            self._expand_parents_on_storage_taglists.setChecked( self._new_options.GetBoolean( 'expand_parents_on_storage_taglists' ) )
+            
+            self._expand_parents_on_storage_taglists.setToolTip( 'This affects taglists in places like the manage tags dialog, where you edit tags as they actually are, and implied parents hang below tags.' )
+            
+            self._expand_parents_on_storage_autocomplete_taglists.setChecked( self._new_options.GetBoolean( 'expand_parents_on_storage_autocomplete_taglists' ) )
+            
+            self._expand_parents_on_storage_autocomplete_taglists.setToolTip( 'This affects the autocomplete results taglist.' )
+            
             self._ac_select_first_with_count.setChecked( self._new_options.GetBoolean( 'ac_select_first_with_count' ) )
             
             #
@@ -3028,6 +2989,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'Default tag service in manage tag dialogs: ', self._default_tag_repository ) )
             rows.append( ( 'Default tag service in search pages: ', self._default_tag_service_search_page ) )
             rows.append( ( 'Default tag sort: ', self._default_tag_sort ) )
+            rows.append( ( 'Show parents expanded by default on edit/write taglists: ', self._expand_parents_on_storage_taglists ) )
+            rows.append( ( 'Show parents expanded by default on edit/write autocomplete taglists: ', self._expand_parents_on_storage_autocomplete_taglists ) )
             rows.append( ( 'By default, select the first tag result with actual count in write-autocomplete: ', self._ac_select_first_with_count ) )
             
             gridbox = ClientGUICommon.WrapInGrid( general_panel, rows )
@@ -3052,8 +3015,10 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         def UpdateOptions( self ):
             
             HC.options[ 'default_tag_repository' ] = self._default_tag_repository.GetValue()
-            HC.options[ 'default_tag_sort' ] = QP.GetClientData( self._default_tag_sort, self._default_tag_sort.currentIndex() )
+            self._new_options.SetDefaultTagSort( self._default_tag_sort.GetValue() )
             
+            self._new_options.SetBoolean( 'expand_parents_on_storage_taglists', self._expand_parents_on_storage_taglists.isChecked() )
+            self._new_options.SetBoolean( 'expand_parents_on_storage_autocomplete_taglists', self._expand_parents_on_storage_autocomplete_taglists.isChecked() )
             self._new_options.SetBoolean( 'ac_select_first_with_count', self._ac_select_first_with_count.isChecked() )
             
             self._new_options.SetKey( 'default_tag_service_search_page', self._default_tag_service_search_page.GetValue() )
@@ -3076,15 +3041,15 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             tag_summary_generator = self._new_options.GetTagSummaryGenerator( 'thumbnail_top' )
             
-            self._thumbnail_top = ClientGUIScrolledPanelsEdit.TagSummaryGeneratorButton( self, tag_summary_generator )
+            self._thumbnail_top = ClientGUITags.TagSummaryGeneratorButton( self, tag_summary_generator )
             
             tag_summary_generator = self._new_options.GetTagSummaryGenerator( 'thumbnail_bottom_right' )
             
-            self._thumbnail_bottom_right = ClientGUIScrolledPanelsEdit.TagSummaryGeneratorButton( self, tag_summary_generator )
+            self._thumbnail_bottom_right = ClientGUITags.TagSummaryGeneratorButton( self, tag_summary_generator )
             
             tag_summary_generator = self._new_options.GetTagSummaryGenerator( 'media_viewer_top' )
             
-            self._media_viewer_top = ClientGUIScrolledPanelsEdit.TagSummaryGeneratorButton( self, tag_summary_generator )
+            self._media_viewer_top = ClientGUITags.TagSummaryGeneratorButton( self, tag_summary_generator )
             
             #
             
@@ -3182,7 +3147,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 self._namespace_colours.SetNamespaceColour( namespace, QG.QColor( random.randint(0,255), random.randint(0,255), random.randint(0,255) ) )
                 
-                self._new_namespace_colour.setText( '' )
+                self._new_namespace_colour.clear()
                 
             
         
@@ -3233,15 +3198,13 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 self._suggested_favourites_services.addItem( tag_service.GetName(), tag_service.GetServiceKey() )
                 
             
-            self._suggested_favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( suggested_tags_favourites_panel )
+            self._suggested_favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( suggested_tags_favourites_panel, CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE )
             
             self._current_suggested_favourites_service = None
             
             self._suggested_favourites_dict = {}
             
-            expand_parents = False
-            
-            self._suggested_favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( suggested_tags_favourites_panel, self._suggested_favourites.AddTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
+            self._suggested_favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( suggested_tags_favourites_panel, self._suggested_favourites.AddTags, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
             
             #
             
@@ -3411,7 +3374,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._suggested_favourites.SetTags( favourites )
             
-            self._suggested_favourites_input.SetTagService( self._current_suggested_favourites_service )
+            self._suggested_favourites_input.SetTagServiceKey( self._current_suggested_favourites_service )
             self._suggested_favourites_input.SetDisplayTagServiceKey( self._current_suggested_favourites_service )
             
         
@@ -3832,7 +3795,7 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 self._EnterURL( url )
                 
-                self._url_input.setText( '' )
+                self._url_input.clear()
                 
             except Exception as e:
                 

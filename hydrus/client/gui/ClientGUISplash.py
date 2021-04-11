@@ -11,9 +11,9 @@ from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client.gui import ClientGUIAsync
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.widgets import ClientGUICommon
 
 class FrameSplashPanel( QW.QWidget ):
     
@@ -188,6 +188,11 @@ class FrameSplashStatus( object ):
         
     
     def SetSubtext( self, text ):
+        
+        if HG.boot_debug and self._updater is not None and len( text ) > 0:
+            
+            HydrusData.Print( text )
+            
         
         with self._lock:
             

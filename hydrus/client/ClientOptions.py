@@ -209,8 +209,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'watch_clipboard_for_watcher_urls' ] = False
         self._dictionary[ 'booleans' ][ 'watch_clipboard_for_other_recognised_urls' ] = False
         
-        self._dictionary[ 'booleans' ][ 'autocomplete_results_fetch_automatically' ] = True
-        
         self._dictionary[ 'booleans' ][ 'autocomplete_float_main_gui' ] = True
         self._dictionary[ 'booleans' ][ 'autocomplete_float_frames' ] = False
         
@@ -230,6 +228,11 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'use_qt_file_dialogs' ] = False
         
         self._dictionary[ 'booleans' ][ 'notify_client_api_cookies' ] = False
+        
+        self._dictionary[ 'booleans' ][ 'expand_parents_on_storage_taglists' ] = True
+        self._dictionary[ 'booleans' ][ 'expand_parents_on_storage_autocomplete_taglists' ] = True
+        
+        self._dictionary[ 'booleans' ][ 'show_session_size_warnings' ] = True
         
         #
         
@@ -273,8 +276,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         
         from hydrus.client.metadata import ClientTags
         
-        self._dictionary[ 'duplicate_action_options' ][ HC.DUPLICATE_BETTER ] = ClientDuplicates.DuplicateActionOptions( [ ( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, HC.CONTENT_MERGE_ACTION_MOVE, ClientTags.TagFilter() ) ], [], sync_archive = True, sync_urls_action = HC.CONTENT_MERGE_ACTION_COPY )
-        self._dictionary[ 'duplicate_action_options' ][ HC.DUPLICATE_SAME_QUALITY ] = ClientDuplicates.DuplicateActionOptions( [ ( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE, ClientTags.TagFilter() ) ], [], sync_archive = True, sync_urls_action = HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE )
+        self._dictionary[ 'duplicate_action_options' ][ HC.DUPLICATE_BETTER ] = ClientDuplicates.DuplicateActionOptions( [ ( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, HC.CONTENT_MERGE_ACTION_MOVE, HydrusTags.TagFilter() ) ], [], sync_archive = True, sync_urls_action = HC.CONTENT_MERGE_ACTION_COPY )
+        self._dictionary[ 'duplicate_action_options' ][ HC.DUPLICATE_SAME_QUALITY ] = ClientDuplicates.DuplicateActionOptions( [ ( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE, HydrusTags.TagFilter() ) ], [], sync_archive = True, sync_urls_action = HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE )
         self._dictionary[ 'duplicate_action_options' ][ HC.DUPLICATE_ALTERNATE ] = ClientDuplicates.DuplicateActionOptions()
         
         #
@@ -305,6 +308,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'integers' ][ 'thumbnail_visibility_scroll_percent' ] = 75
         
         self._dictionary[ 'integers' ][ 'total_pages_warning' ] = 165
+        
+        self._dictionary[ 'integers' ][ 'wake_delay_period' ] = 15
         
         from hydrus.client.gui import ClientGUICanvas
         
@@ -388,9 +393,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         
         self._dictionary[ 'noneable_integers' ][ 'forced_search_limit' ] = None
         
-        self._dictionary[ 'noneable_integers' ][ 'disk_cache_maintenance_mb' ] = None
-        self._dictionary[ 'noneable_integers' ][ 'disk_cache_init_period' ] = None
-        
         self._dictionary[ 'noneable_integers' ][ 'num_recent_tags' ] = 20
         
         self._dictionary[ 'noneable_integers' ][ 'maintenance_vacuum_period_days' ] = 30
@@ -403,8 +405,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'noneable_integers' ][ 'file_viewing_statistics_media_max_time' ] = 600
         self._dictionary[ 'noneable_integers' ][ 'file_viewing_statistics_preview_min_time' ] = 5
         self._dictionary[ 'noneable_integers' ][ 'file_viewing_statistics_preview_max_time' ] = 60
-        
-        self._dictionary[ 'noneable_integers' ][ 'autocomplete_exact_match_threshold' ] = 2
         
         self._dictionary[ 'noneable_integers' ][ 'subscription_file_error_cancel_threshold' ] = 5
         
@@ -443,6 +443,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'strings' ][ 'default_gug_name' ] = 'safebooru tag search'
         self._dictionary[ 'strings' ][ 'has_audio_label' ] = '\U0001F50A'
         self._dictionary[ 'strings' ][ 'has_duration_label' ] = ' \u23F5 '
+        self._dictionary[ 'strings' ][ 'discord_dnd_filename_pattern' ] = '{hash}'
         
         self._dictionary[ 'string_list' ] = {}
         
@@ -612,6 +613,12 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'fallback_sort' ] = ClientMedia.MediaSort( ( 'system', CC.SORT_FILES_BY_IMPORT_TIME ), CC.SORT_ASC )
         
         self._dictionary[ 'default_collect' ] = ClientMedia.MediaCollect()
+        
+        #
+        
+        from hydrus.client.metadata import ClientTagSorting
+        
+        self._dictionary[ 'default_tag_sort' ] = ClientTagSorting.TagSort.STATICGetTextASCDefault()
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
@@ -895,6 +902,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             return self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ]
+            
+        
+    
+    def GetDefaultTagSort( self ):
+        
+        with self._lock:
+            
+            return self._dictionary[ 'default_tag_sort' ]
             
         
     
@@ -1283,6 +1298,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ] = checker_options
+            
+        
+    
+    def SetDefaultTagSort( self, tag_sort ):
+        
+        with self._lock:
+            
+            self._dictionary[ 'default_tag_sort' ] = tag_sort
             
         
     

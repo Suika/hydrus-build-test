@@ -8,11 +8,11 @@ from hydrus.core import HydrusDocumentHandling
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusFlashHandling
 from hydrus.core import HydrusImageHandling
-from hydrus.core import HydrusNetwork
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusText
 from hydrus.core import HydrusVideoHandling
+from hydrus.core.networking import HydrusNetwork
 
 # Mime
 
@@ -34,6 +34,7 @@ header_and_mime = [
     ( 0, b'%PDF', HC.APPLICATION_PDF ),
     ( 0, b'8BPS\x00\x01', HC.APPLICATION_PSD ),
     ( 0, b'8BPS\x00\x02', HC.APPLICATION_PSD ), # PSB, which is basically PSD v2 and does giganto resolution
+    ( 0, b'CSFCHUNK', HC.APPLICATION_CLIP ),
     ( 0, b'PK\x03\x04', HC.APPLICATION_ZIP ),
     ( 0, b'PK\x05\x06', HC.APPLICATION_ZIP ),
     ( 0, b'PK\x07\x08', HC.APPLICATION_ZIP ),
@@ -327,11 +328,6 @@ def GetMime( path, ok_to_look_for_hydrus_updates = False ):
         HydrusData.PrintException( e, do_wait = False )
         
     
-    if HydrusText.LooksLikeHTML( bit_to_check ):
-        
-        return HC.TEXT_HTML
-        
-    
     if ok_to_look_for_hydrus_updates:
         
         with open( path, 'rb' ) as f:
@@ -356,6 +352,11 @@ def GetMime( path, ok_to_look_for_hydrus_updates = False ):
             
             pass
             
+        
+    
+    if HydrusText.LooksLikeHTML( bit_to_check ):
+        
+        return HC.TEXT_HTML
         
     
     return HC.APPLICATION_UNKNOWN

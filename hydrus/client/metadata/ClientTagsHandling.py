@@ -9,6 +9,7 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientServices
@@ -18,7 +19,7 @@ class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_TAG_AUTOCOMPLETE_OPTIONS
     SERIALISABLE_NAME = 'Tag Autocomplete Options'
-    SERIALISABLE_VERSION = 2
+    SERIALISABLE_VERSION = 3
     
     def __init__( self, service_key: typing.Optional[ bytes ] = None ):
         
@@ -48,6 +49,8 @@ class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
         self._namespace_bare_fetch_all_allowed = False
         self._namespace_fetch_all_allowed = False
         self._fetch_all_allowed = False
+        self._fetch_results_automatically = True
+        self._exact_match_character_threshold = 2
         
     
     def _GetSerialisableInfo( self ):
@@ -65,7 +68,9 @@ class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
             self._search_namespaces_into_full_tags,
             self._namespace_bare_fetch_all_allowed,
             self._namespace_fetch_all_allowed,
-            self._fetch_all_allowed
+            self._fetch_all_allowed,
+            self._fetch_results_automatically,
+            self._exact_match_character_threshold
         ]
         
         return serialisable_info
@@ -81,7 +86,9 @@ class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
             self._search_namespaces_into_full_tags,
             self._namespace_bare_fetch_all_allowed,
             self._namespace_fetch_all_allowed,
-            self._fetch_all_allowed
+            self._fetch_all_allowed,
+            self._fetch_results_automatically,
+            self._exact_match_character_threshold
         ] = serialisable_info
         
         self._service_key = bytes.fromhex( serialisable_service_key )
@@ -120,9 +127,52 @@ class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
             return ( 2, new_serialisable_info )
             
         
+        if version == 2:
+            
+            [
+                serialisable_service_key,
+                serialisable_write_autocomplete_tag_domain,
+                override_write_autocomplete_file_domain,
+                serialisable_write_autocomplete_file_domain,
+                search_namespaces_into_full_tags,
+                namespace_bare_fetch_all_allowed,
+                namespace_fetch_all_allowed,
+                fetch_all_allowed
+            ] = old_serialisable_info
+            
+            fetch_results_automatically = True
+            exact_match_character_threshold = 2
+            
+            new_serialisable_info = [
+                serialisable_service_key,
+                serialisable_write_autocomplete_tag_domain,
+                override_write_autocomplete_file_domain,
+                serialisable_write_autocomplete_file_domain,
+                search_namespaces_into_full_tags,
+                namespace_bare_fetch_all_allowed,
+                namespace_fetch_all_allowed,
+                fetch_all_allowed,
+                fetch_results_automatically,
+                exact_match_character_threshold
+            ]
+            
+            return ( 3, new_serialisable_info )
+            
+        
+    
     def FetchAllAllowed( self ):
         
         return self._fetch_all_allowed
+        
+    
+    def FetchResultsAutomatically( self ):
+        
+        return self._fetch_results_automatically
+        
+    
+    def GetExactMatchCharacterThreshold( self ):
+        
+        return self._exact_match_character_threshold
         
     
     def GetServiceKey( self ):
@@ -182,6 +232,16 @@ class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
         return self._search_namespaces_into_full_tags
         
     
+    def SetExactMatchCharacterThreshold( self, exact_match_character_threshold: typing.Optional[ int ] ):
+        
+        self._exact_match_character_threshold = exact_match_character_threshold
+        
+    
+    def SetFetchResultsAutomatically( self, fetch_results_automatically: bool ):
+        
+        self._fetch_results_automatically = fetch_results_automatically
+        
+    
     def SetTuple( self,
         write_autocomplete_tag_domain: bytes,
         override_write_autocomplete_file_domain: bool,
@@ -221,6 +281,9 @@ class TagDisplayMaintenanceManager( object ):
         self._wake_event = threading.Event()
         self._new_data_event = threading.Event()
         
+        self._last_last_new_data_event_time = 0
+        self._last_new_data_event_time = 0
+        
         self._lock = threading.Lock()
         
         self._controller.sub( self, 'Shutdown', 'shutdown' )
@@ -248,7 +311,7 @@ class TagDisplayMaintenanceManager( object ):
             
         else:
             
-            return 2.5
+            return 30
             
         
     
@@ -279,7 +342,7 @@ class TagDisplayMaintenanceManager( object ):
             
             if service_key in self._go_faster:
                 
-                ideally = 15
+                ideally = 30
                 
                 base = max( 0.5, self._last_loop_work_time )
                 
@@ -304,6 +367,12 @@ class TagDisplayMaintenanceManager( object ):
         if len( self._go_faster ) > 0:
             
             return True
+            
+        
+        # we are getting new display data pretty fast. if it is streaming in, let's take a break
+        if not HydrusData.TimeHasPassed( self._last_last_new_data_event_time + 10 ):
+            
+            return False
             
         
         if self._controller.CurrentlyIdle():
@@ -424,6 +493,11 @@ class TagDisplayMaintenanceManager( object ):
                 
                 if self._new_data_event.is_set():
                     
+                    time.sleep( 1 )
+                    
+                    self._last_last_new_data_event_time = self._last_new_data_event_time
+                    self._last_new_data_event_time = HydrusData.GetNow()
+                    
                     self._service_keys_to_needs_work = {}
                     
                     self._new_data_event.clear()
@@ -470,7 +544,7 @@ class TagDisplayManager( HydrusSerialisable.SerialisableBase ):
         
         HydrusSerialisable.SerialisableBase.__init__( self )
         
-        service_keys_to_tag_filters_defaultdict = lambda: collections.defaultdict( ClientTags.TagFilter )
+        service_keys_to_tag_filters_defaultdict = lambda: collections.defaultdict( HydrusTags.TagFilter )
         
         self._tag_display_types_to_service_keys_to_tag_filters = collections.defaultdict( service_keys_to_tag_filters_defaultdict )
         
@@ -586,7 +660,7 @@ class TagDisplayManager( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            service_keys_to_tag_filters_defaultdict = lambda: collections.defaultdict( ClientTags.TagFilter )
+            service_keys_to_tag_filters_defaultdict = lambda: collections.defaultdict( HydrusTags.TagFilter )
             
             self._tag_display_types_to_service_keys_to_tag_filters = collections.defaultdict( service_keys_to_tag_filters_defaultdict )
             
@@ -679,7 +753,7 @@ class TagDisplayManager( HydrusSerialisable.SerialisableBase ):
             
             tag_filter = self._tag_display_types_to_service_keys_to_tag_filters[ tag_display_type ][ service_key ]
             
-            tag_filter.SetRule( tag, CC.FILTER_BLACKLIST )
+            tag_filter.SetRule( tag, HC.FILTER_BLACKLIST )
             
             self._dirty = True
             
@@ -734,8 +808,8 @@ class TagParentsStructure( object ):
     
     def __init__( self ):
         
-        self._tags_to_ancestors = collections.defaultdict( set )
-        self._tags_to_descendants = collections.defaultdict( set )
+        self._descendants_to_ancestors = collections.defaultdict( set )
+        self._ancestors_to_descendants = collections.defaultdict( set )
         
         # some sort of structure for 'bad cycles' so we can later raise these to the user to fix
         
@@ -751,9 +825,9 @@ class TagParentsStructure( object ):
             return
             
         
-        if parent in self._tags_to_ancestors:
+        if parent in self._descendants_to_ancestors:
             
-            if child in self._tags_to_ancestors[ parent ]:
+            if child in self._descendants_to_ancestors[ parent ]:
                 
                 # this is a loop!
                 
@@ -761,50 +835,50 @@ class TagParentsStructure( object ):
                 
             
         
-        if child in self._tags_to_ancestors and parent in self._tags_to_ancestors[ child ]:
+        if child in self._descendants_to_ancestors and parent in self._descendants_to_ancestors[ child ]:
             
             # already in
             
             return
             
         
-        # let's now join these two families together
+        # let's now gather all ancestors of parent and all descendants of child
         
         new_ancestors = { parent }
         
-        if parent in self._tags_to_ancestors:
+        if parent in self._descendants_to_ancestors:
             
-            new_ancestors.update( self._tags_to_ancestors[ parent ] )
+            new_ancestors.update( self._descendants_to_ancestors[ parent ] )
             
         
         new_descendants = { child }
         
-        if child in self._tags_to_descendants:
+        if child in self._ancestors_to_descendants:
             
-            new_descendants.update( self._tags_to_descendants[ child ] )
+            new_descendants.update( self._ancestors_to_descendants[ child ] )
             
         
         # every (grand)parent now gets all new (grand)kids
         for ancestor in new_ancestors:
             
-            self._tags_to_descendants[ ancestor ].update( new_descendants )
+            self._ancestors_to_descendants[ ancestor ].update( new_descendants )
             
         
         # every (grand)kid now gets all new (grand)parents
         for descendant in new_descendants:
             
-            self._tags_to_ancestors[ descendant ].update( new_ancestors )
+            self._descendants_to_ancestors[ descendant ].update( new_ancestors )
             
         
     
     def GetTagsToAncestors( self ):
         
-        return self._tags_to_ancestors
+        return self._descendants_to_ancestors
         
     
     def IterateDescendantAncestorPairs( self ):
         
-        for ( descandant, ancestors ) in self._tags_to_ancestors.items():
+        for ( descandant, ancestors ) in self._descendants_to_ancestors.items():
             
             for ancestor in ancestors:
                 

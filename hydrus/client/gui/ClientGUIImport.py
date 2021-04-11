@@ -16,8 +16,6 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
-from hydrus.client.gui import ClientGUICommon
-from hydrus.client.gui import ClientGUIControls
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
@@ -34,7 +32,9 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.networking import ClientGUINetworkJobControl
 from hydrus.client.gui.search import ClientGUIACDropdown
+from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportLocal
 from hydrus.client.importing import ClientImportOptions
@@ -155,7 +155,9 @@ class FileImportOptionsButton( ClientGUICommon.BetterButton ):
     
 class FilenameTaggingOptionsPanel( QW.QWidget ):
     
-    def __init__( self, parent, service_key, tag_update_callable, filename_tagging_options = None, present_for_accompanying_file_list = False ):
+    tagsChanged = QC.Signal()
+    
+    def __init__( self, parent, service_key, filename_tagging_options = None, present_for_accompanying_file_list = False ):
         
         if filename_tagging_options is None:
             
@@ -172,8 +174,11 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
         
         # eventually these will take 'regexoptions' or whatever object and 'showspecificfiles' as well
         
-        self._simple_panel = self._SimplePanel( self._notebook, self._service_key, tag_update_callable, filename_tagging_options, present_for_accompanying_file_list )
-        self._advanced_panel = self._AdvancedPanel( self._notebook, self._service_key, tag_update_callable, filename_tagging_options, present_for_accompanying_file_list )
+        self._simple_panel = self._SimplePanel( self._notebook, self._service_key, filename_tagging_options, present_for_accompanying_file_list )
+        self._advanced_panel = self._AdvancedPanel( self._notebook, self._service_key, filename_tagging_options, present_for_accompanying_file_list )
+        
+        self._simple_panel.tagsChanged.connect( self.tagsChanged )
+        self._advanced_panel.tagsChanged.connect( self.tagsChanged )
         
         self._notebook.addTab( self._simple_panel, 'simple' )
         self._notebook.setCurrentWidget( self._simple_panel )
@@ -217,12 +222,13 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
     
     class _AdvancedPanel( QW.QWidget ):
         
-        def __init__( self, parent, service_key, refresh_callable, filename_tagging_options, present_for_accompanying_file_list ):
+        tagsChanged = QC.Signal()
+        
+        def __init__( self, parent, service_key, filename_tagging_options, present_for_accompanying_file_list ):
             
             QW.QWidget.__init__( self, parent )
             
             self._service_key = service_key
-            self._refresh_callable = refresh_callable
             self._present_for_accompanying_file_list = present_for_accompanying_file_list
             
             #
@@ -260,15 +266,15 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             
             self._num_base = QP.MakeQSpinBox( self._num_panel, min=-10000000, max=10000000, width = 60 )
             self._num_base.setValue( 1 )
-            self._num_base.valueChanged.connect( self.EventRecalcNum )
+            self._num_base.valueChanged.connect( self.tagsChanged )
             
             self._num_step = QP.MakeQSpinBox( self._num_panel, min=-1000000, max=1000000, width = 60 )
             self._num_step.setValue( 1 )
-            self._num_step.valueChanged.connect( self.EventRecalcNum )
+            self._num_step.valueChanged.connect( self.tagsChanged )
             
             self._num_namespace = QW.QLineEdit()
             self._num_namespace.setFixedWidth( 100 )
-            self._num_namespace.textChanged.connect( self.EventNumNamespaceChanged )
+            self._num_namespace.textChanged.connect( self.tagsChanged )
             
             if not self._present_for_accompanying_file_list:
                 
@@ -331,6 +337,8 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             
             self.setLayout( hbox )
             
+            self._quick_namespaces_list.columnListContentsChanged.connect( self.tagsChanged )
+            
         
         def _ConvertQuickRegexDataToListCtrlTuples( self, data ):
             
@@ -353,8 +361,6 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                     data = ( namespace, regex )
                     
                     self._quick_namespaces_list.AddDatas( ( data, ) )
-                    
-                    self._refresh_callable()
                     
                 
             
@@ -385,8 +391,6 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                     
                 
             
-            self._refresh_callable()
-            
         
         def AddRegex( self ):
             
@@ -411,20 +415,10 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                 
                 self._regexes.addItem( regex )
                 
-                self._regex_box.setText( '' )
+                self._regex_box.clear()
                 
-                self._refresh_callable()
+                self.tagsChanged.emit()
                 
-            
-        
-        def EventNumNamespaceChanged( self, val ):
-            
-            self._refresh_callable()
-            
-        
-        def EventRecalcNum( self, val ):
-            
-            self._refresh_callable()
             
         
         def EventRemoveRegex( self, item ):
@@ -440,7 +434,7 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                 
                 QP.ListWidgetDelete( self._regexes, selection )
                 
-                self._refresh_callable()
+                self.tagsChanged.emit()
                 
             
         
@@ -475,23 +469,22 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
     
     class _SimplePanel( QW.QWidget ):
         
-        def __init__( self, parent, service_key, refresh_callable, filename_tagging_options, present_for_accompanying_file_list ):
+        tagsChanged = QC.Signal()
+        
+        def __init__( self, parent, service_key, filename_tagging_options, present_for_accompanying_file_list ):
             
             QW.QWidget.__init__( self, parent )
             
             self._service_key = service_key
-            self._refresh_callable = refresh_callable
             self._present_for_accompanying_file_list = present_for_accompanying_file_list
             
             #
             
             self._tags_panel = ClientGUICommon.StaticBox( self, 'tags for all' )
             
-            self._tags = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self._tags_panel, self._service_key, self.TagsRemoved )
+            self._tags = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self._tags_panel, self._service_key, ClientTags.TAG_DISPLAY_STORAGE )
             
-            expand_parents = True
-            
-            self._tag_autocomplete_all = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._tags_panel, self.EnterTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key, show_paste_button = True )
+            self._tag_autocomplete_all = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._tags_panel, self.EnterTags, CC.LOCAL_FILE_SERVICE_KEY, service_key, show_paste_button = True )
             
             self._tags_paste_button = ClientGUICommon.BetterButton( self._tags_panel, 'paste tags', self._PasteTags )
             
@@ -501,13 +494,11 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             
             self._paths_to_single_tags = collections.defaultdict( set )
             
-            self._single_tags = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self._single_tags_panel, self._service_key, self.SingleTagsRemoved )
+            self._single_tags = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self._single_tags_panel, self._service_key, ClientTags.TAG_DISPLAY_STORAGE )
             
             self._single_tags_paste_button = ClientGUICommon.BetterButton( self._single_tags_panel, 'paste tags', self._PasteSingleTags )
             
-            expand_parents = True
-            
-            self._tag_autocomplete_selection = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._single_tags_panel, self.EnterTagsSingle, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key, show_paste_button = True )
+            self._tag_autocomplete_selection = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._single_tags_panel, self.EnterTagsSingle, CC.LOCAL_FILE_SERVICE_KEY, service_key, show_paste_button = True )
             
             self.SetSelectedPaths( [] )
             
@@ -563,15 +554,15 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             self._filename_checkbox.setChecked( add_filename_boolean )
             self._filename_namespace.setText( add_filename_namespace )
             
-            for ( index, ( dir_boolean, dir_namespace ) ) in list(directory_dict.items()):
+            for ( index, ( dir_boolean, dir_namespace ) ) in directory_dict.items():
                 
                 ( dir_checkbox, dir_namespace_textctrl ) = self._directory_namespace_controls[ index ]
                 
                 dir_checkbox.setChecked( dir_boolean )
                 dir_namespace_textctrl.setText( dir_namespace )
                 
-                dir_checkbox.clicked.connect( self.EventRefresh )
-                dir_namespace_textctrl.textChanged.connect( self.EventRefresh )
+                dir_checkbox.clicked.connect( self.tagsChanged )
+                dir_namespace_textctrl.textChanged.connect( self.tagsChanged )
                 
             
             #
@@ -621,9 +612,12 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             
             #
             
-            self._load_from_txt_files_checkbox.clicked.connect( self.EventRefresh )
-            self._filename_namespace.textChanged.connect( self.EventRefresh )
-            self._filename_checkbox.clicked.connect( self.EventRefresh )
+            self._tags.tagsRemoved.connect( self.tagsChanged )
+            self._single_tags.tagsRemoved.connect( self.SingleTagsRemoved )
+            
+            self._load_from_txt_files_checkbox.clicked.connect( self.tagsChanged )
+            self._filename_namespace.textChanged.connect( self.tagsChanged )
+            self._filename_checkbox.clicked.connect( self.tagsChanged )
             
         
         def _GetTagsFromClipboard( self ):
@@ -708,7 +702,7 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                 
                 self._tags.AddTags( tags )
                 
-                self._refresh_callable()
+                self.tagsChanged.emit()
                 
             
         
@@ -727,13 +721,8 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                     current_tags.update( tags )
                     
                 
-                self._refresh_callable()
+                self.tagsChanged.emit()
                 
-            
-        
-        def EventRefresh( self ):
-            
-            self._refresh_callable()
             
         
         def GetTags( self, index, path ):
@@ -748,16 +737,16 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             return tags
             
         
-        def SingleTagsRemoved( self, tags ):
+        def SingleTagsRemoved( self ):
+            
+            tags = self._single_tags.GetTags()
             
             for path in self._selected_paths:
                 
-                current_tags = self._paths_to_single_tags[ path ]
-                
-                current_tags.difference_update( tags )
+                self._paths_to_single_tags[ path ] = tags
                 
             
-            self._refresh_callable()
+            self.tagsChanged.emit()
             
         
         def SetSelectedPaths( self, paths ):
@@ -788,9 +777,9 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             self._single_tags.SetTags( single_tags )
             
         
-        def TagsRemoved( self, tag ):
+        def TagsRemoved( self, *args ):
             
-            self._refresh_callable()
+            self.tagsChanged.emit()
             
         
         def UpdateFilenameTaggingOptions( self, filename_tagging_options ):
@@ -1499,7 +1488,7 @@ class EditLocalImportFilenameTaggingPanel( ClientGUIScrolledPanels.EditPanel ):
             
             #
             
-            self._filename_tagging_panel = FilenameTaggingOptionsPanel( self, self._service_key, self.ScheduleRefreshFileList, present_for_accompanying_file_list = True )
+            self._filename_tagging_panel = FilenameTaggingOptionsPanel( self, self._service_key, present_for_accompanying_file_list = True )
             
             self._schedule_refresh_file_list_job = None
             
@@ -1516,6 +1505,8 @@ class EditLocalImportFilenameTaggingPanel( ClientGUIScrolledPanels.EditPanel ):
             QP.AddToLayout( vbox, self._filename_tagging_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
             
             self.setLayout( vbox )
+            
+            self._filename_tagging_panel.tagsChanged.connect( self.ScheduleRefreshFileList )
             
         
         def _ConvertDataToListCtrlTuples( self, data ):
@@ -1591,13 +1582,13 @@ class EditFilenameTaggingOptionPanel( ClientGUIScrolledPanels.EditPanel ):
         self._example_path_input = QW.QLineEdit( self )
         self._example_output = QW.QLineEdit( self )
         
-        self._filename_tagging_options_panel = FilenameTaggingOptionsPanel( self, self._service_key, self.ScheduleRefreshTags, filename_tagging_options = filename_tagging_options, present_for_accompanying_file_list = False )
+        self._filename_tagging_options_panel = FilenameTaggingOptionsPanel( self, self._service_key, filename_tagging_options = filename_tagging_options, present_for_accompanying_file_list = False )
         
         self._schedule_refresh_tags_job = None
         
         #
         
-        self._example_path_input.setText( 'enter example path here' )
+        self._example_path_input.setPlaceholderText( 'enter example path here' )
         self._example_output.setEnabled( False )
         
         #
@@ -1613,6 +1604,8 @@ class EditFilenameTaggingOptionPanel( ClientGUIScrolledPanels.EditPanel ):
         #
         
         self._example_path_input.textChanged.connect( self.ScheduleRefreshTags )
+        
+        self._filename_tagging_options_panel.tagsChanged.connect( self.ScheduleRefreshTags )
         
     
     def GetValue( self ):
@@ -1639,6 +1632,24 @@ class EditFilenameTaggingOptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
     
     def ScheduleRefreshTags( self ):
+        
+        path = self._example_path_input.text()
+        
+        if path.startswith( '"' ) and path.endswith( '"' ):
+            
+            path = path[1:-1]
+            
+            self._example_path_input.setText( path )
+            
+        
+        if path.startswith( 'file:///' ):
+            
+            path = path.replace( 'file:///', '', 1 )
+            
+            path = os.path.normpath( path )
+            
+            self._example_path_input.setText( path )
+            
         
         if self._schedule_refresh_tags_job is not None:
             
@@ -1669,7 +1680,7 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
         
         self._file_status = ClientGUICommon.BetterStaticText( self._import_queue_panel, ellipsize_end = True )
         self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self._import_queue_panel, HG.client_controller, self._page_key )
-        self._file_download_control = ClientGUIControls.NetworkJobControl( self._import_queue_panel )
+        self._file_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._import_queue_panel )
         
         self._files_pause_button = ClientGUICommon.BetterBitmapButton( self._import_queue_panel, CC.global_pixmaps().file_pause, self.PauseFiles )
         self._files_pause_button.setToolTip( 'pause/play files' )
@@ -1683,7 +1694,7 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
         
         self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._gallery_panel, HG.client_controller, False, True, page_key = self._page_key )
         
-        self._gallery_download_control = ClientGUIControls.NetworkJobControl( self._gallery_panel )
+        self._gallery_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._gallery_panel )
         
         self._file_limit = ClientGUICommon.NoneableSpinCtrl( self, 'stop after this many files', min = 1, none_phrase = 'no limit' )
         self._file_limit.valueChanged.connect( self.EventFileLimit )
@@ -1760,11 +1771,11 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
             self._file_import_options.setEnabled( False )
             self._tag_import_options.setEnabled( False )
             
-            self._query_text.setText( '' )
+            self._query_text.clear()
             
-            self._file_status.setText( '' )
+            self._file_status.clear()
             
-            self._gallery_status.setText( '' )
+            self._gallery_status.clear()
             
             self._file_seed_cache_control.SetFileSeedCache( None )
             
@@ -2225,7 +2236,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
         
         self._file_status = ClientGUICommon.BetterStaticText( imports_panel, ellipsize_end = True )
         self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( imports_panel, HG.client_controller, self._page_key )
-        self._file_download_control = ClientGUIControls.NetworkJobControl( imports_panel )
+        self._file_download_control = ClientGUINetworkJobControl.NetworkJobControl( imports_panel )
         
         #
         
@@ -2247,7 +2258,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
         
         self._checker_options_button = CheckerOptionsButton( checker_panel, checker_options, update_callable = self._SetCheckerOptions )
         
-        self._checker_download_control = ClientGUIControls.NetworkJobControl( checker_panel )
+        self._checker_download_control = ClientGUINetworkJobControl.NetworkJobControl( checker_panel )
         
         file_import_options = ClientImportOptions.FileImportOptions()
         tag_import_options = ClientImportOptions.TagImportOptions( is_default = True )
@@ -2339,15 +2350,15 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
             self._file_import_options.setEnabled( False )
             self._tag_import_options.setEnabled( False )
             
-            self._watcher_subject.setText( '' )
+            self._watcher_subject.clear()
             
-            self._watcher_url.setText( '' )
+            self._watcher_url.clear()
             
-            self._file_status.setText( '' )
+            self._file_status.clear()
             
-            self._file_velocity_status.setText( '' )
+            self._file_velocity_status.clear()
             
-            self._watcher_status.setText( '' )
+            self._watcher_status.clear()
             
             self._file_seed_cache_control.SetFileSeedCache( None )
             
@@ -2371,7 +2382,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
                 
             else:
                 
-                self._watcher_url.setText( '' )
+                self._watcher_url.clear()
                 
             
             checker_options = self._watcher.GetCheckerOptions()

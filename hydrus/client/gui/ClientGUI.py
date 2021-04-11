@@ -26,11 +26,12 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNetwork
-from hydrus.core import HydrusNetworking
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTags
 from hydrus.core import HydrusText
 from hydrus.core import HydrusVideoHandling
+from hydrus.core.networking import HydrusNetwork
+from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
@@ -41,7 +42,6 @@ from hydrus.client import ClientRendering
 from hydrus.client import ClientServices
 from hydrus.client import ClientThreading
 from hydrus.client.gui import ClientGUIAsync
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsManage
@@ -57,11 +57,9 @@ from hydrus.client.gui import ClientGUIManagement
 from hydrus.client.gui import ClientGUIMediaControls
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIMPV
-from hydrus.client.gui import ClientGUINetwork
 from hydrus.client.gui import ClientGUIPages
 from hydrus.client.gui import ClientGUIParsing
 from hydrus.client.gui import ClientGUIPopupMessages
-from hydrus.client.gui import ClientGUIServices
 from hydrus.client.gui import ClientGUIScrolledPanelsEdit
 from hydrus.client.gui import ClientGUIScrolledPanelsManagement
 from hydrus.client.gui import ClientGUIScrolledPanelsReview
@@ -75,12 +73,29 @@ from hydrus.client.gui import ClientGUITags
 from hydrus.client.gui import ClientGUITopLevelWindows
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.networking import ClientGUIHydrusNetwork
+from hydrus.client.gui.networking import ClientGUINetwork
+from hydrus.client.gui.services import ClientGUIClientsideServices
+from hydrus.client.gui.services import ClientGUIServersideServices
+from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.media import ClientMediaResult
 from hydrus.client.metadata import ClientTags
-from hydrus.client.networking import ClientNetworkingContexts
 
 MENU_ORDER = [ 'file', 'undo', 'pages', 'database', 'network', 'services', 'tags', 'pending', 'help' ]
 
+def GetTagServiceKeyForMaintenance( win: QW.QWidget ):
+    
+    tag_services = HG.client_controller.services_manager.GetServices( HC.REAL_TAG_SERVICES )
+    
+    choice_tuples = [ ( 'all services', None, 'Do it for everything. Can take a long time!' ) ]
+    
+    for service in tag_services:
+        
+        choice_tuples.append( ( service.GetName(), service.GetServiceKey(), service.GetName() ) )
+        
+    
+    return ClientGUIDialogsQuick.SelectFromListButtons( win, 'Which service?', choice_tuples )
+    
 def THREADUploadPending( service_key ):
     
     try:
@@ -311,6 +326,8 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         self._persistent_mpv_widgets = []
         
+        self._have_shown_session_size_warning = False
+        
         self._closed_pages = []
         
         self._lock = threading.Lock()
@@ -339,8 +356,6 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         self._widget_event_filter = QP.WidgetEventFilter( self )
         
-        self._widget_event_filter.EVT_LEFT_DCLICK( self.EventFrameNewPage )
-        self._widget_event_filter.EVT_MIDDLE_DOWN( self.EventFrameNewPage )
         self._widget_event_filter.EVT_ICONIZE( self.EventIconize )
         
         self._widget_event_filter.EVT_MOVE( self.EventMove )
@@ -446,6 +461,17 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         library_versions.append( ( 'python', v ) )
         library_versions.append( ( 'openssl', ssl.OPENSSL_VERSION ) )
         
+        from hydrus.core import HydrusEncryption
+        
+        if HydrusEncryption.OPENSSL_OK:
+            
+            library_versions.append( ( 'PyOpenSSL', 'available' ) )
+            
+        else:
+            
+            library_versions.append( ( 'PyOpenSSL', 'not available' ) )
+            
+        
         library_versions.append( ( 'OpenCV', cv2.__version__ ) )
         library_versions.append( ( 'Pillow', PIL.__version__ ) )
         
@@ -509,6 +535,10 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         library_versions.append( ( 'install dir', HC.BASE_DIR ) )
         library_versions.append( ( 'db dir', HG.client_controller.db_dir ) )
         library_versions.append( ( 'temp dir', HydrusPaths.GetCurrentTempDir() ) )
+        library_versions.append( ( 'db journal mode', HG.db_journal_mode ) )
+        library_versions.append( ( 'db cache size per file', '{}MB'.format( HG.db_cache_size ) ) )
+        library_versions.append( ( 'db synchronous value', str( HG.db_synchronous ) ) )
+        library_versions.append( ( 'db using memory for temp?', str( HG.no_db_temp_files ) ) )
         
         import locale
         
@@ -541,25 +571,6 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         aboutinfo.SetWebSite( 'https://hydrusnetwork.github.io/hydrus/' )
         
         QP.AboutBox( self, aboutinfo )
-        
-    
-    def _AccountInfo( self, service_key ):
-        
-        with ClientGUIDialogs.DialogTextEntry( self, 'Enter the account\'s account key.' ) as dlg:
-            
-            if dlg.exec() == QW.QDialog.Accepted:
-                
-                subject_account_key = bytes.fromhex( dlg.GetValue() )
-                
-                service = self._controller.services_manager.GetService( service_key )
-                
-                response = service.Request( HC.GET, 'account_info', { 'subject_account_key' : subject_account_key } )
-                
-                account_info = response[ 'account_info' ]
-                
-                QW.QMessageBox.information( self, 'Information', str(account_info) )
-                
-            
         
     
     def _AnalyzeDatabase( self ):
@@ -1423,6 +1434,8 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         self._controller.new_options.FlipBoolean( option_name )
         
+        self._controller.WriteSynchronous( 'serialisable', self._controller.new_options )
+        
         self._last_clipboard_watched_text = ''
         
         if self._clipboard_watcher_repeating_job is None:
@@ -1521,7 +1534,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             paths = []
             
         
-        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'importing files' )
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'review files to import' )
         
         panel = ClientGUIScrolledPanelsReview.ReviewLocalFileImports( frame, paths )
         
@@ -1994,23 +2007,74 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         self._controller.CallToThread( do_it, service, lock )
         
     
-    def _ManageAccountTypes( self, service_key ):
+    def _STARTManageAccountTypes( self, service_key ):
         
-        title = 'manage account types'
+        admin_service = HG.client_controller.services_manager.GetService( service_key )
         
-        with ClientGUITopLevelWindowsPanels.DialogManage( self, title ) as dlg:
+        job_key = ClientThreading.JobKey()
+        
+        job_key.SetVariable( 'popup_text_1', 'loading account types\u2026' )
+        
+        self._controller.pub( job_key )
+        
+        def work_callable():
             
-            panel = ClientGUIServices.ManageAccountTypesPanel( dlg, service_key )
+            response = admin_service.Request( HC.GET, 'account_types' )
+            
+            account_types = response[ 'account_types' ]
+            
+            return account_types
+            
+        
+        def publish_callable( account_types ):
+            
+            job_key.Delete()
+            
+            self._ManageAccountTypes( service_key, account_types )
+            
+        
+        def errback_callable( etype, value, tb ):
+            
+            HydrusData.ShowText( 'Sorry, unable to load account types:' )
+            HydrusData.ShowExceptionTuple( etype, value, tb, do_wait = False )
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable, errback_callable = errback_callable )
+        
+        job.start()
+        
+    
+    def _ManageAccountTypes( self, service_key, account_types ):
+        
+        admin_service = HG.client_controller.services_manager.GetService( service_key )
+        
+        title = 'edit account types'
+        
+        with ClientGUITopLevelWindowsPanels.DialogEdit( self, title ) as dlg:
+            
+            panel = ClientGUIHydrusNetwork.EditAccountTypesPanel( dlg, admin_service.GetServiceType(), account_types )
             
             dlg.SetPanel( panel )
             
-            dlg.exec()
+            if dlg.exec() == QW.QDialog.Accepted:
+                
+                ( account_types, deletee_account_type_keys_to_new_account_type_keys ) = panel.GetValue()
+                
+                serialisable_deletee_account_type_keys_to_new_account_type_keys = HydrusSerialisable.SerialisableBytesDictionary( deletee_account_type_keys_to_new_account_type_keys )
+                
+                def do_it():
+                    
+                    admin_service.Request( HC.POST, 'account_types', { 'account_types' : account_types, 'deletee_account_type_keys_to_new_account_type_keys' : serialisable_deletee_account_type_keys_to_new_account_type_keys } )
+                    
+                
+                self._controller.CallToThread( do_it )
+                
             
         
     
     def _ManageDefaultTagImportOptions( self ):
         
-        title = 'manage default tag import options'
+        title = 'edit default tag import options'
         
         with ClientGUITopLevelWindowsPanels.DialogEdit( self, title ) as dlg:
             
@@ -2465,7 +2529,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         with ClientGUITopLevelWindowsPanels.DialogManage( self, title ) as dlg:
             
-            panel = ClientGUIServices.ManageServerServicesPanel( dlg, service_key )
+            panel = ClientGUIServersideServices.ManageServerServicesPanel( dlg, service_key )
             
             dlg.SetPanel( panel )
             
@@ -2485,7 +2549,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             with ClientGUITopLevelWindowsPanels.DialogManage( self, title ) as dlg:
                 
-                panel = ClientGUIServices.ManageClientServicesPanel( dlg )
+                panel = ClientGUIClientsideServices.ManageClientServicesPanel( dlg )
                 
                 dlg.SetPanel( panel )
                 
@@ -2847,10 +2911,6 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
     
     def _ModifyAccount( self, service_key ):
         
-        QW.QMessageBox.information( self, 'Information', 'this does not work yet!' )
-        
-        return
-        
         service = self._controller.services_manager.GetService( service_key )
         
         with ClientGUIDialogs.DialogTextEntry( self, 'Enter the account key for the account to be modified.' ) as dlg:
@@ -2868,9 +2928,13 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     return
                     
                 
-                subject_account = 'blah' # fetch account from service
+                subject_account_identifiers = [ HydrusNetwork.AccountIdentifier( account_key = account_key ) ]
                 
-                with ClientGUIDialogs.DialogModifyAccounts( self, service_key, [ subject_account ] ) as dlg2: dlg2.exec()
+                frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'manage accounts' )
+                
+                panel = ClientGUIHydrusNetwork.ModifyAccountsPanel( frame, service_key, subject_account_identifiers )
+                
+                frame.SetPanel( panel )
                 
             
         
@@ -2884,7 +2948,14 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         export_path = ClientExporting.GetExportPath()
         
-        HydrusPaths.LaunchDirectory( export_path )
+        if export_path is None:
+            
+            HydrusData.ShowText( 'Unfortunately, your export path could not be determined!' )
+            
+        else:
+            
+            HydrusPaths.LaunchDirectory( export_path )
+            
         
     
     def _OpenInstallFolder( self ):
@@ -2989,6 +3060,63 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         self._statusbar.SetStatusText( db_status, 5, tooltip = db_tooltip )
         
     
+    def _RegenerateTagCache( self ):
+        
+        message = 'This will delete and then recreate the fast search cache for one or all tag services.'
+        message += os.linesep * 2
+        message += 'If you have a lot of tags and files, it can take a little while, during which the gui may hang.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless. It fixes missing autocomplete or tag search results.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'regenerate_tag_cache', tag_service_key = tag_service_key )
+            
+        
+    
+    def _RegenerateLocalHashCache( self ):
+        
+        message = 'This will delete and then recreate the local hash cache, which keeps a small record of hashes for files on your hard drive. It isn\'t super important, but it speeds most operations up, and this routine fixes it when broken.'
+        message += os.linesep * 2
+        message += 'If you have a lot of files, it can take a long time, during which the gui may hang.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            self._controller.Write( 'regenerate_local_hash_cache' )
+            
+        
+    
+    def _RegenerateLocalTagCache( self ):
+        
+        message = 'This will delete and then recreate the local tag cache, which keeps a small record of tags for files on your hard drive. It isn\'t super important, but it speeds most operations up, and this routine fixes it when broken.'
+        message += os.linesep * 2
+        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            self._controller.Write( 'regenerate_local_tag_cache' )
+            
+        
+    
     def _RegenerateTagDisplayMappingsCache( self ):
         
         message = 'This will delete and then recreate the tag \'display\' mappings cache, which is used for user-presented tag searching, loading, and autocomplete counts. This is useful if miscounting (particularly related to siblings/parents) has somehow occurred.'
@@ -2997,27 +3125,72 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         message += os.linesep * 2
         message += 'If you do not have a specific reason to run this, it is pointless.'
         
-        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
         
         if result == QW.QDialog.Accepted:
             
-            self._controller.Write( 'regenerate_tag_display_mappings_cache' )
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'regenerate_tag_display_mappings_cache', tag_service_key = tag_service_key )
+            
+        
+    
+    def _RegenerateTagDisplayPendingMappingsCache( self ):
+        
+        message = 'This will delete and then recreate the pending tags on the tag \'display\' mappings cache, which is used for user-presented tag searching, loading, and autocomplete counts. This is useful if you have \'ghost\' pending tags or counts hanging around.'
+        message += os.linesep * 2
+        message += 'If you have a millions of pending tags, it can take a long time, during which the gui may hang.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'regenerate_tag_display_pending_mappings_cache', tag_service_key = tag_service_key )
             
         
     
     def _RegenerateTagMappingsCache( self ):
         
-        message = 'This will delete and then recreate the entire tag \'storage\' mappings cache, which is used for raw tag searching, loading, and autocomplete counts. This is useful if miscounting has somehow occurred.'
+        message = 'WARNING: Do not run this for no reason! On a large database, this could take hours to finish!'
         message += os.linesep * 2
-        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang. It necessarily involves a regeneration of the tag display mappings cache, which relies on the storage cache. All siblings and parents will have to be resynced.'
+        message += 'This will delete and then recreate the entire tag \'storage\' mappings cache, which is used for tag calculation based on actual values and autocomplete counts in editing contexts like _manage tags_. This is useful if miscounting has somehow occurred.'
+        message += os.linesep * 2
+        message += 'If you have a lot of tags and files, it can take a long time, during which the gui may hang. It necessarily involves a regeneration of the tag display mappings cache, which relies on the storage cache, and the tag text search cache. All siblings and parents will have to be resynced.'
         message += os.linesep * 2
         message += 'If you do not have a specific reason to run this, it is pointless.'
         
-        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
         
         if result == QW.QDialog.Accepted:
             
-            self._controller.Write( 'regenerate_tag_mappings_cache' )
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'regenerate_tag_mappings_cache', tag_service_key = tag_service_key )
             
         
     
@@ -3059,56 +3232,28 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
-    def _RepopulateMappingsTables( self ):
+    def _RegenerateTagCacheSearchableSubtagsMaps( self ):
         
-        message = 'WARNING: Do not run this for no reason!'
+        message = 'This will regenerate the fast search cache\'s \'unusual character logic\' lookup map, for one or all tag services.'
         message += os.linesep * 2
-        message += 'If you have significant local tags (e.g. \'my tags\') storage, recently had a \'malformed\' client.mappings.db file, and have since gone through clone/repair and now have a truncated file, this routine will attempt to recover missing tags from the smaller tag cache stored in client.caches.db.'
+        message += 'If you have a lot of tags, it can take a little while, during which the gui may hang.'
         message += os.linesep * 2
-        message += 'It can only recover tags for files currently stored by your client. It will take some time, during which the gui may hang. Once it is done, you probably want to regenerate your tag mappings cache, so that you are completely synced again.'
+        message += 'If you do not have a specific reason to run this, it is pointless. It fixes missing autocomplete search results.'
         
-        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'I have a reason to run this, let\'s do it', no_label = 'forget it' )
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
         
         if result == QW.QDialog.Accepted:
             
-            job_key = ClientThreading.JobKey( cancellable = True )
-            
-            job_key.SetVariable( 'popup_text_title', 'repopulating mapping tables' )
-            
-            self._controller.pub( 'modal_message', job_key )
-            
-            self._controller.Write( 'repopulate_mappings_from_cache', job_key = job_key )
-            
-        
-    
-    def _RepopulateTagSearchCache( self ):
-        
-        message = 'This will go through all the tag definitions in the database and make sure there is a correct fast-search record for it.'
-        message += os.linesep * 2
-        message += 'It may take a long time, and the gui may hang.'
-        message += os.linesep * 2
-        message += 'If you do not have a specific reason to run this, it is pointless.'
-        
-        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
-        
-        if result == QW.QDialog.Accepted:
-            
-            job_key = ClientThreading.JobKey()
-            
-            job_key.SetVariable( 'popup_text_title', 'repopulating and updating tag text search cache' )
-            
-            self._controller.pub( 'modal_message', job_key )
-            
-            status_hook = lambda s: job_key.SetVariable( 'popup_text_1', s )
-            
-            def do_it():
+            try:
                 
-                self._controller.WriteSynchronous( 'repopulate_tag_search_cache', status_hook = status_hook )
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
                 
-                job_key.Finish()
+            except HydrusExceptions.CancelledException:
+                
+                return
                 
             
-            self._controller.CallToThreadLongRunning( do_it )
+            self._controller.Write( 'regenerate_searchable_subtag_maps', tag_service_key = tag_service_key )
             
         
     
@@ -3144,14 +3289,116 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
+    def _RepopulateMappingsTables( self ):
+        
+        message = 'WARNING: Do not run this for no reason!'
+        message += os.linesep * 2
+        message += 'If you have significant local tags (e.g. \'my tags\') storage, recently had a \'malformed\' client.mappings.db file, and have since gone through clone/repair and now have a truncated file, this routine will attempt to recover missing tags from the smaller tag cache stored in client.caches.db.'
+        message += os.linesep * 2
+        message += 'It can only recover tags for files currently stored by your client. It will take some time, during which the gui may hang. Once it is done, you probably want to regenerate your tag mappings cache, so that you are completely synced again.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'I have a reason to run this, let\'s do it--now choose which service', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            job_key = ClientThreading.JobKey( cancellable = True )
+            
+            job_key.SetVariable( 'popup_text_title', 'repopulating mapping tables' )
+            
+            self._controller.pub( 'modal_message', job_key )
+            
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'repopulate_mappings_from_cache', tag_service_key = tag_service_key, job_key = job_key )
+            
+        
+    
+    def _RepopulateTagCacheMissingSubtags( self ):
+        
+        message = 'This will repopulate the fast search cache\'s subtag search, filling in missing entries, for one or all tag services.'
+        message += os.linesep * 2
+        message += 'If you have a lot of tags and files, it can take a little while, during which the gui may hang.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless. It fixes missing autocomplete or tag search results.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'repopulate_tag_cache_missing_subtags', tag_service_key = tag_service_key )
+            
+        
+    
     def _RestoreSplitterPositions( self ):
         
         self._controller.pub( 'set_splitter_positions', HC.options[ 'hpos' ], HC.options[ 'vpos' ] )
         
     
+    def _STARTReviewAllAccounts( self, service_key ):
+        
+        admin_service = HG.client_controller.services_manager.GetService( service_key )
+        
+        job_key = ClientThreading.JobKey()
+        
+        job_key.SetVariable( 'popup_text_1', 'loading accounts\u2026' )
+        
+        self._controller.pub( job_key )
+        
+        def work_callable():
+            
+            response = admin_service.Request( HC.GET, 'all_accounts' )
+            
+            accounts = response[ 'accounts' ]
+            
+            return accounts
+            
+        
+        def publish_callable( accounts ):
+            
+            job_key.Delete()
+            
+            self._ReviewAllAccounts( service_key, accounts )
+            
+        
+        def errback_callable( etype, value, tb ):
+            
+            HydrusData.ShowText( 'Sorry, unable to load accounts:' )
+            HydrusData.ShowExceptionTuple( etype, value, tb, do_wait = False )
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable, errback_callable = errback_callable )
+        
+        job.start()
+        
+    
+    def _ReviewAllAccounts( self, service_key, accounts ):
+        
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'all accounts' )
+        
+        panel = ClientGUIHydrusNetwork.ListAccountsPanel( frame, service_key, accounts )
+        
+        frame.SetPanel( panel )
+        
+    
     def _ReviewBandwidth( self ):
         
-        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'review bandwidth' )
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'review bandwidth use and edit rules' )
         
         panel = ClientGUINetwork.ReviewAllBandwidthPanel( frame, self._controller )
         
@@ -3189,7 +3436,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, self._controller.PrepStringForDisplay( 'Review Services' ), 'review_services' )
         
-        panel = ClientGUIServices.ReviewServicesPanel( frame, self._controller )
+        panel = ClientGUIClientsideServices.ReviewServicesPanel( frame, self._controller )
         
         frame.SetPanel( panel )
         
@@ -3269,7 +3516,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             #
             
-            api_permissions = ClientAPI.APIPermissions( name = 'hydrus test access', basic_permissions = list( ClientAPI.ALLOWED_PERMISSIONS ), search_tag_filter = ClientTags.TagFilter() )
+            api_permissions = ClientAPI.APIPermissions( name = 'hydrus test access', basic_permissions = list( ClientAPI.ALLOWED_PERMISSIONS ), search_tag_filter = HydrusTags.TagFilter() )
             
             access_key = api_permissions.GetAccessKey()
             
@@ -3910,16 +4157,6 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
         
     
-    def _PausePlaySearch( self ):
-        
-        page = self._notebook.GetCurrentMediaPage()
-        
-        if page is not None:
-            
-            page.PausePlaySearch()
-            
-        
-    
     def _SetupBackupPath( self ):
         
         backup_intro = 'Everything in your client is stored in the database, which consists of a handful of .db files and a single subdirectory that contains all your media files. It is a very good idea to maintain a regular backup schedule--to save from hard drive failure, serious software fault, accidental deletion, or any other unexpected problem. It sucks to lose all your work, so make sure it can\'t happen!'
@@ -4059,6 +4296,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             HG.daemon_report_mode = not HG.daemon_report_mode
             
+        elif name == 'callto_profile_mode':
+            
+            HG.callto_profile_mode = not HG.callto_profile_mode
+            
         elif name == 'db_report_mode':
             
             HG.db_report_mode = not HG.db_report_mode
@@ -4110,6 +4351,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         elif name == 'pubsub_profile_mode':
             
             HG.pubsub_profile_mode = not HG.pubsub_profile_mode
+            
+        elif name == 'server_profile_mode':
+            
+            HG.server_profile_mode = not HG.server_profile_mode
             
         elif name == 'shortcut_report_mode':
             
@@ -4403,6 +4648,18 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
         
     
+    def AskToDeleteAllClosedPages( self ):
+        
+        message = 'Clear the {} closed pages?'.format( HydrusData.ToHumanInt( len( self._closed_pages ) ) )
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message )
+        
+        if result == QW.QDialog.Accepted:
+            
+            self.DeleteAllClosedPages()
+            
+        
+    
     def AutoSaveLastSession( self ):
         
         only_save_last_session_during_idle = self._controller.new_options.GetBoolean( 'only_save_last_session_during_idle' )
@@ -4535,27 +4792,6 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         self._MigrateDatabase()
         
     
-    def EventFrameNewPage( self, event ):
-        
-        screen_position = QG.QCursor.pos()
-        
-        self._notebook.EventNewPageFromScreenPosition( screen_position )
-        
-    
-    def mouseReleaseEvent( self, event ):
-        
-        if event.button() != QC.Qt.RightButton:
-            
-            ClientGUITopLevelWindows.MainFrameThatResizes.mouseReleaseEvent( self, event )
-            
-            return
-            
-        
-        screen_position = QG.QCursor.pos()
-        
-        self._notebook.ShowMenuFromScreenPosition( screen_position )
-        
-    
     def EventIconize( self, event: QG.QWindowStateChangeEvent ):
         
         if self.isMinimized():
@@ -4626,7 +4862,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                         
                         summary = 'Profiling animation timer: ' + repr( window )
                         
-                        HydrusData.Profile( summary, 'window.TIMERAnimationUpdate()', globals(), locals(), min_duration_ms = 3 )
+                        HydrusData.Profile( summary, 'window.TIMERAnimationUpdate()', globals(), locals(), min_duration_ms = 3, show_summary = True )
                         
                     else:
                         
@@ -4721,10 +4957,12 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                 menu = QW.QMenu( self )
                 
                 if undo_string is not None:
+                    
                     ClientGUIMenus.AppendMenuItem( menu, undo_string, 'Undo last operation.', self._controller.pub, 'undo' )
                     
                 
                 if redo_string is not None:
+                    
                     ClientGUIMenus.AppendMenuItem( menu, redo_string, 'Redo last operation.', self._controller.pub, 'redo' )
                     
                 
@@ -4734,7 +4972,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                     
                     undo_pages = QW.QMenu( menu )
                     
-                    ClientGUIMenus.AppendMenuItem( undo_pages, 'clear all', 'Remove all closed pages from memory.', self.DeleteAllClosedPages )
+                    ClientGUIMenus.AppendMenuItem( undo_pages, 'clear all', 'Remove all closed pages from memory.', self.AskToDeleteAllClosedPages )
                     
                     undo_pages.addSeparator()
                     
@@ -4792,8 +5030,17 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                 
                 ClientGUIMenus.AppendMenuItem( menu, 'restore from a database backup', 'Restore the database from an external location.', self._controller.RestoreDatabase )
                 
-                ClientGUIMenus.AppendSeparator( menu )
+            else:
                 
+                message = 'Your database is stored across multiple locations, which disables my internal backup routine. To back up, please use a third-party program that will work better than anything I can write.'
+                message += os.linesep * 2
+                message += 'Please check the help for more info on how best to backup manually.'
+                
+                ClientGUIMenus.AppendMenuItem( menu, 'database is complicated', 'Restore the database from an external location.', HydrusData.ShowText, message )
+                
+            
+            ClientGUIMenus.AppendSeparator( menu )
+            
             ClientGUIMenus.AppendMenuItem( menu, 'migrate database', 'Review and manage the locations your database is stored.', self._MigrateDatabase )
             
             ClientGUIMenus.AppendSeparator( menu )
@@ -4847,15 +5094,23 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             submenu = QW.QMenu( menu )
             
             ClientGUIMenus.AppendMenuItem( submenu, 'tag storage mappings cache', 'Delete and recreate the tag mappings cache, fixing any miscounts.', self._RegenerateTagMappingsCache )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache', 'Delete and recreate the tag display mappings cache, fixing any miscounts.', self._RegenerateTagDisplayMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache (deferred siblings & parents calculation)', 'Delete and recreate the tag display mappings cache, fixing any miscounts.', self._RegenerateTagDisplayMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache (just pending tags, instant calculation)', 'Delete and recreate the tag display pending mappings cache, fixing any miscounts.', self._RegenerateTagDisplayPendingMappingsCache )
             ClientGUIMenus.AppendMenuItem( submenu, 'tag siblings lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagSiblingsLookupCache )
             ClientGUIMenus.AppendMenuItem( submenu, 'tag parents lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagParentsLookupCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag text search cache', 'Delete and regenerate the cache hydrus uses for fast tag search.', self._RegenerateTagCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag text search cache (subtags repopulation)', 'Repopulate the subtags for the cache hydrus uses for fast tag search.', self._RepopulateTagCacheMissingSubtags )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag text search cache (searchable subtag maps)', 'Regenerate the searchable subtag maps.', self._RegenerateTagCacheSearchableSubtagsMaps )
+            
+            ClientGUIMenus.AppendSeparator( submenu )
+            
+            ClientGUIMenus.AppendMenuItem( submenu, 'local hash cache', 'Repopulate the cache hydrus uses for fast hash lookup for local files.', self._RegenerateLocalHashCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'local tag cache', 'Repopulate the cache hydrus uses for fast tag lookup for local files.', self._RegenerateLocalTagCache )
             
             ClientGUIMenus.AppendSeparator( submenu )
             
             ClientGUIMenus.AppendMenuItem( submenu, 'clear service info cache', 'Delete all cached service info like total number of mappings or files, in case it has become desynchronised. Some parts of the gui may be laggy immediately after this as these numbers are recalculated.', self._DeleteServiceInfo )
             ClientGUIMenus.AppendMenuItem( submenu, 'similar files search tree', 'Delete and recreate the similar files search tree.', self._RegenerateSimilarFilesTree )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag definition search cache', 'Repopulate the cache hydrus uses for fast tag search.', self._RepopulateTagSearchCache )
             
             ClientGUIMenus.AppendMenu( menu, submenu, 'regenerate' )
             
@@ -4908,7 +5163,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             submenu = QW.QMenu( menu )
             
-            ClientGUIMenus.AppendMenuItem( submenu, 'review bandwidth usage', 'See where you are consuming data.', self._ReviewBandwidth )
+            ClientGUIMenus.AppendMenuItem( submenu, 'review bandwidth usage and edit rules', 'See where you are consuming data.', self._ReviewBandwidth )
             ClientGUIMenus.AppendMenuItem( submenu, 'review current network jobs', 'Review the jobs currently running in the network engine.', self._ReviewNetworkJobs )
             ClientGUIMenus.AppendMenuItem( submenu, 'review session cookies', 'Review and edit which cookies you have for which network contexts.', self._ReviewNetworkSessions )
             ClientGUIMenus.AppendMenuItem( submenu, 'manage http headers', 'Configure how the client talks to the network.', self._ManageNetworkHeaders )
@@ -5001,7 +5256,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             submenu = QW.QMenu( menu )
             
-            ClientGUIMenus.AppendMenuCheckItem( submenu, 'repositories synchronisation', 'Pause the client\'s synchronisation with hydrus repositories.', HC.options['pause_repo_sync'], self._PausePlaySync, 'repo' )
+            ClientGUIMenus.AppendMenuCheckItem( submenu, 'all repository synchronisation', 'Pause the client\'s synchronisation with hydrus repositories.', HC.options['pause_repo_sync'], self._PausePlaySync, 'repo' )
             
             ClientGUIMenus.AppendMenu( menu, submenu, 'pause' )
             
@@ -5010,37 +5265,35 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             ClientGUIMenus.AppendMenuItem( menu, 'review services', 'Look at the services your client connects to.', self._ReviewServices )
             ClientGUIMenus.AppendMenuItem( menu, 'manage services', 'Edit the services your client connects to.', self._ManageServices )
             
-            repository_admin_permissions = [ ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE ), ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_OVERRULE ), ( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_OVERRULE ) ]
+            repository_admin_permissions = [ ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE ), ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE ), ( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_MODERATE ) ]
             
             repositories = self._controller.services_manager.GetServices( HC.REPOSITORIES )
             admin_repositories = [ service for service in repositories if True in ( service.HasPermission( content_type, action ) for ( content_type, action ) in repository_admin_permissions ) ]
             
             servers_admin = self._controller.services_manager.GetServices( ( HC.SERVER_ADMIN, ) )
-            server_admins = [ service for service in servers_admin if service.HasPermission( HC.CONTENT_TYPE_SERVICES, HC.PERMISSION_ACTION_OVERRULE ) ]
+            server_admins = [ service for service in servers_admin if service.HasPermission( HC.CONTENT_TYPE_SERVICES, HC.PERMISSION_ACTION_MODERATE ) ]
             
-            if len( admin_repositories ) > 0 or len( server_admins ) > 0:
+            admin_services = admin_repositories + server_admins
+            
+            if len( admin_services ) > 0:
                 
                 admin_menu = QW.QMenu( menu )
                 
-                for service in admin_repositories:
+                for service in admin_services:
                     
                     submenu = QW.QMenu( admin_menu )
                     
                     service_key = service.GetServiceKey()
                     
                     can_create_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE )
-                    can_overrule_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_OVERRULE )
-                    can_overrule_account_types = service.HasPermission( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_OVERRULE )
-                    
-                    if can_create_accounts:
-                        
-                        ClientGUIMenus.AppendMenuItem( submenu, 'create new accounts', 'Create new account keys for this service.', self._GenerateNewAccounts, service_key )
-                        
+                    can_overrule_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE )
+                    can_overrule_account_types = service.HasPermission( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_MODERATE )
+                    can_overrule_services = service.HasPermission( HC.CONTENT_TYPE_SERVICES, HC.PERMISSION_ACTION_MODERATE )
                     
                     if can_overrule_accounts:
                         
+                        ClientGUIMenus.AppendMenuItem( submenu, 'review all accounts', 'See all accounts.', self._STARTReviewAllAccounts, service_key )
                         ClientGUIMenus.AppendMenuItem( submenu, 'modify an account', 'Modify a specific account\'s type and expiration.', self._ModifyAccount, service_key )
-                        ClientGUIMenus.AppendMenuItem( submenu, 'get an account\'s info', 'Fetch information about an account from the service.', self._AccountInfo, service_key )
                         
                     
                     if can_overrule_accounts and service.GetServiceType() == HC.FILE_REPOSITORY:
@@ -5048,46 +5301,21 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                         ClientGUIMenus.AppendMenuItem( submenu, 'get an uploader\'s ip address', 'Fetch the ip address that uploaded a specific file, if the service knows it.', self._FetchIP, service_key )
                         
                     
-                    if can_overrule_account_types:
+                    if can_create_accounts:
                         
                         ClientGUIMenus.AppendSeparator( submenu )
                         
-                        ClientGUIMenus.AppendMenuItem( submenu, 'manage account types', 'Add, edit and delete account types for this service.', self._ManageAccountTypes, service_key )
-                        
-                    
-                    ClientGUIMenus.AppendMenu( admin_menu, submenu, service.GetName() )
-                    
-                
-                for service in server_admins:
-                    
-                    submenu = QW.QMenu( admin_menu )
-                    
-                    service_key = service.GetServiceKey()
-                    
-                    can_create_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE )
-                    can_overrule_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_OVERRULE )
-                    can_overrule_account_types = service.HasPermission( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_OVERRULE )
-                    
-                    if can_create_accounts:
                         ClientGUIMenus.AppendMenuItem( submenu, 'create new accounts', 'Create new account keys for this service.', self._GenerateNewAccounts, service_key )
                         
                     
-                    if can_overrule_accounts:
-                        
-                        ClientGUIMenus.AppendMenuItem( submenu, 'modify an account', 'Modify a specific account\'s type and expiration.', self._ModifyAccount, service_key )
-                        ClientGUIMenus.AppendMenuItem( submenu, 'get an account\'s info', 'Fetch information about an account from the service.', self._AccountInfo, service_key )
-                        
-                    
                     if can_overrule_account_types:
                         
                         ClientGUIMenus.AppendSeparator( submenu )
                         
-                        ClientGUIMenus.AppendMenuItem( submenu, 'manage account types', 'Add, edit and delete account types for this service.', self._ManageAccountTypes, service_key )
+                        ClientGUIMenus.AppendMenuItem( submenu, 'manage account types', 'Add, edit and delete account types for this service.', self._STARTManageAccountTypes, service_key )
                         
                     
-                    can_overrule_services = service.HasPermission( HC.CONTENT_TYPE_SERVICES, HC.PERMISSION_ACTION_OVERRULE )
-                    
-                    if can_overrule_services:
+                    if can_overrule_services and service.GetServiceType() == HC.SERVER_ADMIN:
                         
                         ClientGUIMenus.AppendSeparator( submenu )
                         
@@ -5170,9 +5398,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             site = ClientGUIMenus.AppendMenuBitmapItem( links, 'site', 'Open hydrus\'s website, which is mostly a mirror of the local help.', CC.global_pixmaps().file_repository, ClientPaths.LaunchURLInWebBrowser, 'https://hydrusnetwork.github.io/hydrus/' )
             site = ClientGUIMenus.AppendMenuBitmapItem( links, 'github repository', 'Open the hydrus github repository.', CC.global_pixmaps().github, ClientPaths.LaunchURLInWebBrowser, 'https://github.com/hydrusnetwork/hydrus' )
+            site = ClientGUIMenus.AppendMenuBitmapItem( links, 'latest build', 'Open the latest build on the hydrus github repository.', CC.global_pixmaps().github, ClientPaths.LaunchURLInWebBrowser, 'https://github.com/hydrusnetwork/hydrus/releases/latest' )
             site = ClientGUIMenus.AppendMenuBitmapItem( links, 'issue tracker', 'Open the github issue tracker, which is run by users.', CC.global_pixmaps().github, ClientPaths.LaunchURLInWebBrowser, 'https://github.com/hydrusnetwork/hydrus/issues' )
-            site = ClientGUIMenus.AppendMenuBitmapItem( links, '8kun board', 'Open hydrus dev\'s 8kun board, where he makes release posts and other status updates.', CC.global_pixmaps().eight_kun, ClientPaths.LaunchURLInWebBrowser, 'https://8kun.top/hydrus/index.html' )
-            site = ClientGUIMenus.AppendMenuItem( links, 'Endchan board bunker', 'Open hydrus dev\'s Endchan board, the bunker for when 8kun is unavailable. Try .org if .net is unavailable.', ClientPaths.LaunchURLInWebBrowser, 'https://endchan.net/hydrus/index.html' )
+            site = ClientGUIMenus.AppendMenuBitmapItem( links, '8chan.moe /t/ (Hydrus Network General)', 'Open the 8chan.moe /t/ board, where a Hydrus Network General should exist with release posts and other status updates.', CC.global_pixmaps().eight_chan, ClientPaths.LaunchURLInWebBrowser, 'https://8chan.moe/t/catalog.html' )
+            site = ClientGUIMenus.AppendMenuItem( links, 'Endchan board bunker', 'Open hydrus dev\'s Endchan board, the bunker for the case when 8chan.moe is unavailable. Try .org if .net is unavailable.', ClientPaths.LaunchURLInWebBrowser, 'https://endchan.net/hydrus/index.html' )
             site = ClientGUIMenus.AppendMenuBitmapItem( links, 'twitter', 'Open hydrus dev\'s twitter, where he makes general progress updates and emergency notifications.', CC.global_pixmaps().twitter, ClientPaths.LaunchURLInWebBrowser, 'https://twitter.com/hydrusnetwork' )
             site = ClientGUIMenus.AppendMenuBitmapItem( links, 'tumblr', 'Open hydrus dev\'s tumblr, where he makes release posts and other status updates.', CC.global_pixmaps().tumblr, ClientPaths.LaunchURLInWebBrowser, 'https://hydrus.tumblr.com/' )
             site = ClientGUIMenus.AppendMenuBitmapItem( links, 'discord', 'Open a discord channel where many hydrus users congregate. Hydrus dev visits regularly.', CC.global_pixmaps().discord, ClientPaths.LaunchURLInWebBrowser, 'https://discord.gg/wPHPCUZ' )
@@ -5218,7 +5447,16 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             profile_modes = QW.QMenu( debug )
             
-            ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'db profile mode', 'Run detailed \'profiles\' on every database query and dump this information to the log (this is very useful for hydrus dev to have, if something is running slow for you!).', HG.db_profile_mode, self._SwitchBoolean, 'db_profile_mode' )
+            profile_mode_message = 'If something is running slow, you can turn on one of these modes to have hydrus gather information on how long each part takes to run. You probably want \'db profile mode\'.'
+            profile_mode_message += os.linesep * 2
+            profile_mode_message += 'Turn the mode on, do the slow thing for a bit, and then turn it off. In your database directory will be a new profile log, which is really helpful for hydrus dev to figure out what in your case is running slow.'
+            profile_mode_message += os.linesep * 2
+            profile_mode_message += 'More information is available in the help, under \'reducing program lag\'.'
+            
+            ClientGUIMenus.AppendMenuItem( profile_modes, 'what is this?', 'Show profile info.', QW.QMessageBox.information, self, 'Profile modes', profile_mode_message )
+            ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'callto profile mode', 'Run detailed \'profiles\' on most threaded jobs and dump this information to the log (this is very useful for hydrus dev to have, if something is running slow for you in UI!).', HG.callto_profile_mode, self._SwitchBoolean, 'callto_profile_mode' )
+            ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'client api profile mode', 'Run detailed \'profiles\' on every client api query and dump this information to the log (this is very useful for hydrus dev to have, if something is running slow for you!).', HG.server_profile_mode, self._SwitchBoolean, 'server_profile_mode' )
+            ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'db profile mode', 'Run detailed \'profiles\' on every database query and dump this information to the log (this is very useful for hydrus dev to have, if something is running slow for you in the DB!).', HG.db_profile_mode, self._SwitchBoolean, 'db_profile_mode' )
             ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'menu profile mode', 'Run detailed \'profiles\' on menu actions.', HG.menu_profile_mode, self._SwitchBoolean, 'menu_profile_mode' )
             ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'pubsub profile mode', 'Run detailed \'profiles\' on every internal publisher/subscriber message and dump this information to the log. This can hammer your log with dozens of large dumps every second. Don\'t run it unless you know you need to.', HG.pubsub_profile_mode, self._SwitchBoolean, 'pubsub_profile_mode' )
             ClientGUIMenus.AppendMenuCheckItem( profile_modes, 'ui timer profile mode', 'Run detailed \'profiles\' on every ui timer update. This will likely spam you!', HG.ui_timer_profile_mode, self._SwitchBoolean, 'ui_timer_profile_mode' )
@@ -5268,6 +5506,8 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             ClientGUIMenus.AppendMenuItem( data_actions, 'subscription manager snapshot', 'Have the subscription system show what it is doing.', self._controller.subscriptions_manager.ShowSnapshot )
             ClientGUIMenus.AppendMenuItem( data_actions, 'flush log', 'Command the log to write any buffered contents to hard drive.', HydrusData.DebugPrint, 'Flushing log' )
             ClientGUIMenus.AppendMenuItem( data_actions, 'enable truncated image loading', 'Enable the truncated image loading to test out broken jpegs.', self._EnableLoadTruncatedImages )
+            ClientGUIMenus.AppendSeparator( data_actions )
+            ClientGUIMenus.AppendMenuItem( data_actions, 'simulate program quit signal', 'Kill the program via a QApplication quit.', QW.QApplication.instance().quit )
             
             ClientGUIMenus.AppendMenu( debug, data_actions, 'data actions' )
             
@@ -5280,7 +5520,6 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             ClientGUIMenus.AppendMenuItem( memory_actions, 'print garbage', 'Print some information about the python garbage to the log.', self._DebugPrintGarbage )
             ClientGUIMenus.AppendMenuItem( memory_actions, 'take garbage snapshot', 'Capture current garbage object counts.', self._DebugTakeGarbageSnapshot )
             ClientGUIMenus.AppendMenuItem( memory_actions, 'show garbage snapshot changes', 'Show object count differences from the last snapshot.', self._DebugShowGarbageDifferences )
-            ClientGUIMenus.AppendMenuItem( memory_actions, 'load whole db in disk cache', 'Contiguously read as much of the db as will fit into memory. This will massively speed up any subsequent big job.', self._controller.CallToThread, self._controller.Read, 'load_into_disk_cache' )
             
             ClientGUIMenus.AppendMenu( debug, memory_actions, 'memory actions' )
             
@@ -5442,6 +5681,13 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         
         self._last_total_page_weight = total_active_weight + total_closed_weight
         
+        if total_active_weight > 500000 and self._controller.new_options.GetBoolean( 'show_session_size_warnings' ) and not self._have_shown_session_size_warning:
+            
+            self._have_shown_session_size_warning = True
+            
+            HydrusData.ShowText( 'Your session weight is {}, which is pretty big! To keep your UI lag-free and avoid potential session saving problems that occur around 2 million weight, please try to close some pages or clear some finished downloaders!'.format( HydrusData.ToHumanInt( total_active_weight ) ) )
+            
+        
         ClientGUIMenus.AppendMenuLabel( menu, '{} pages open'.format( HydrusData.ToHumanInt( total_active_page_count ) ), 'You have this many pages open.' )
         ClientGUIMenus.AppendMenuLabel( menu, 'total session weight: {}'.format( HydrusData.ToHumanInt( self._last_total_page_weight ) ), 'Your session is this heavy.' )
         
@@ -5560,7 +5806,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         
         services = self._controller.services_manager.GetServices()
         
-        petition_permissions = [ ( content_type, HC.PERMISSION_ACTION_OVERRULE ) for content_type in HC.REPOSITORY_CONTENT_TYPES ]
+        petition_permissions = [ ( content_type, HC.PERMISSION_ACTION_MODERATE ) for content_type in HC.REPOSITORY_CONTENT_TYPES ]
         
         repositories = [ service for service in services if service.GetServiceType() in HC.REPOSITORIES ]
         
@@ -6134,10 +6380,6 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                 
                 self._ShowHideSplitters()
                 
-            elif action == CAC.SIMPLE_SYNCHRONISED_WAIT_SWITCH:
-                
-                self._PausePlaySearch()
-                
             elif action == CAC.SIMPLE_SET_MEDIA_FOCUS:
                 
                 self._SetMediaFocus()
@@ -6328,7 +6570,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             return
             
         
-        global_tracker = self._controller.network_engine.bandwidth_manager.GetTracker( ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT )
+        global_tracker = self._controller.network_engine.bandwidth_manager.GetMySessionTracker()
         
         boot_time = self._controller.GetBootTime()
         
@@ -6437,7 +6679,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                 
                 summary = 'Profiling page timer: ' + repr( page )
                 
-                HydrusData.Profile( summary, 'page.REPEATINGPageUpdate()', globals(), locals(), min_duration_ms = 3 )
+                HydrusData.Profile( summary, 'page.REPEATINGPageUpdate()', globals(), locals(), min_duration_ms = 3, show_summary = True )
                 
             else:
                 
@@ -6482,7 +6724,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                     
                     summary = 'Profiling ui update timer: ' + repr( window )
                     
-                    HydrusData.Profile( summary, 'window.TIMERUIUpdate()', globals(), locals(), min_duration_ms = 3 )
+                    HydrusData.Profile( summary, 'window.TIMERUIUpdate()', globals(), locals(), min_duration_ms = 3, show_summary = True )
                     
                 else:
                     
@@ -6609,7 +6851,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
         
     
-    def SaveAndClose( self ):
+    def SaveAndHide( self ):
         
         if self._done_save_and_close:
             
@@ -6680,8 +6922,6 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             HydrusData.PrintException( e )
             
-        
-        self.deleteLater()
         
     
     def SetMediaFocus( self ):
@@ -6777,6 +7017,13 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                             
                             text = 'Is now a good time for the client to do up to ' + HydrusData.ToHumanInt( idle_shutdown_max_minutes ) + ' minutes\' maintenance work? (Will auto-no in 15 seconds)'
                             text += os.linesep * 2
+                            
+                            if HG.client_controller.IsFirstStart():
+                                
+                                text += 'Since this is your first session, this maintenance should should just be some quick initialisation work. It should only take a few seconds.'
+                                text += os.linesep * 2
+                                
+                            
                             text += 'The outstanding jobs appear to be:'
                             text += os.linesep * 2
                             text += os.linesep.join( work_to_do )

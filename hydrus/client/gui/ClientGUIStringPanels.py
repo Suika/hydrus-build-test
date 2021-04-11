@@ -1,5 +1,7 @@
+import re
 import typing
 
+from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
 from hydrus.core import HydrusConstants as HC
@@ -8,7 +10,6 @@ from hydrus.core import HydrusExceptions
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientParsing
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -17,7 +18,287 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.widgets import ClientGUICommon
 
+NO_RESULTS_TEXT = 'no results'
+
+class MultilineStringConversionTestPanel( QW.QWidget ):
+    
+    textSelected = QC.Signal( str )
+    
+    def __init__( self, parent: QW.QWidget, string_processor: ClientParsing.StringProcessor ):
+        
+        QW.QWidget.__init__( self, parent )
+        
+        self._string_processor = string_processor
+        
+        self._test_data = QW.QListWidget( self )
+        
+        self._test_data.setSelectionMode( QW.QListWidget.SingleSelection )
+        
+        self._result_data = QW.QListWidget( self )
+        
+        self._result_data.setSelectionMode( QW.QListView.NoSelection )
+        
+        #
+        
+        left_vbox = QP.VBoxLayout()
+        right_vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( left_vbox, ClientGUICommon.BetterStaticText( self, label = 'starting strings' ), CC.FLAGS_CENTER )
+        QP.AddToLayout( left_vbox, self._test_data, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( right_vbox, ClientGUICommon.BetterStaticText( self, label = 'processed strings' ), CC.FLAGS_CENTER )
+        QP.AddToLayout( right_vbox, self._result_data, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, left_vbox, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        QP.AddToLayout( hbox, right_vbox, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        
+        self.setLayout( hbox )
+        
+        self._test_data.itemSelectionChanged.connect( self.EventSelection )
+        
+    
+    def _GetStartingTexts( self ):
+        
+        return [ self._test_data.item( i ).data( QC.Qt.UserRole ) for i in range( self._test_data.count() ) ]
+        
+    
+    def _UpdateResults( self ):
+        
+        texts = self._GetStartingTexts()
+        
+        try:
+            
+            results = self._string_processor.ProcessStrings( texts )
+            
+        except HydrusExceptions.ParseException as e:
+            
+            results = [ 'error in processing: {}'.format( e ) ]
+            
+        
+        self._result_data.clear()
+        
+        for ( insertion_index, result ) in enumerate( results ):
+            
+            item = QW.QListWidgetItem()
+            
+            item.setText( result )
+            item.setData( QC.Qt.UserRole, result )
+            
+            self._result_data.insertItem( insertion_index, item )
+            
+        
+    
+    def EventSelection( self ):
+        
+        items = self._test_data.selectedItems()
+        
+        if len( items ) == 1:
+            
+            ( list_widget_item, ) = items
+            
+            text = list_widget_item.data( QC.Qt.UserRole )
+            
+            self.textSelected.emit( text )
+            
+        
+    
+    def GetResultTexts( self, step_index ):
+        
+        texts = self._GetStartingTexts()
+        
+        try:
+            
+            results = self._string_processor.ProcessStrings( texts, max_steps_allowed = step_index + 1 )
+            
+        except:
+            
+            results = []
+            
+        
+        return results
+        
+    
+    def SetStringProcessor( self, string_processor: ClientParsing.StringProcessor ):
+        
+        self._string_processor = string_processor
+        
+        self._UpdateResults()
+        
+    
+    def SetTestData( self, test_data: ClientParsing.ParsingTestData ):
+        
+        self._test_data.clear()
+        
+        for ( insertion_index, text ) in enumerate( test_data.texts ):
+            
+            item = QW.QListWidgetItem()
+            
+            item.setText( text )
+            item.setData( QC.Qt.UserRole, text )
+            
+            self._test_data.insertItem( insertion_index, item )
+            
+        
+        self._UpdateResults()
+        
+        if len( test_data.texts ) > 0:
+            
+            self._test_data.item( 0 ).setSelected( False )
+            self._test_data.item( 0 ).setSelected( True )
+            
+            #self.textSelected.emit( self._test_data.item( 0 ).data( QC.Qt.UserRole ) )
+            
+        
+    
+class SingleStringConversionTestPanel( QW.QWidget ):
+    
+    def __init__( self, parent: QW.QWidget, string_processor: ClientParsing.StringProcessor ):
+        
+        QW.QWidget.__init__( self, parent )
+        
+        self._string_processor = string_processor
+        
+        self._example_string = QW.QLineEdit( self )
+        
+        self._example_results = ClientGUICommon.BetterNotebook( self )
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, ClientGUICommon.BetterStaticText( self, label = 'single example string' ), CC.FLAGS_CENTER )
+        QP.AddToLayout( vbox, self._example_string, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        QP.AddToLayout( vbox, ClientGUICommon.BetterStaticText( self, label = 'results for each step' ), CC.FLAGS_CENTER )
+        QP.AddToLayout( vbox, self._example_results, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self.setLayout( vbox )
+        
+        self._example_string.textChanged.connect( self._UpdateResults )
+        
+    
+    def _UpdateResults( self ):
+        
+        processing_steps = self._string_processor.GetProcessingSteps()
+        
+        current_selected_index = self._example_results.currentIndex()
+        
+        self._example_results.DeleteAllPages()
+        
+        example_string = self._example_string.text()
+        
+        stop_now = False
+        
+        for i in range( len( processing_steps ) ):
+            
+            if isinstance( processing_steps[i], ClientParsing.StringSlicer ):
+                
+                continue
+                
+            
+            try:
+                
+                results = self._string_processor.ProcessStrings( [ example_string ], max_steps_allowed = i + 1, no_slicing = True )
+                
+            except Exception as e:
+                
+                results = [ 'error: {}'.format( str( e ) ) ]
+                
+                stop_now = True
+                
+            
+            results_list = QW.QListWidget( self._example_results )
+            results_list.setSelectionMode( QW.QListWidget.NoSelection )  
+            
+            if len( results ) == 0:
+                
+                results_list.addItem( NO_RESULTS_TEXT )
+                
+                stop_now = True
+                
+            else:
+                
+                for result in results:
+                    
+                    if not isinstance( result, str ):
+                        
+                        result = repr( result )
+                        
+                    
+                    results_list.addItem( result )
+                    
+                
+            
+            tab_label = '{} ({})'.format( processing_steps[i].ToString( simple = True ), HydrusData.ToHumanInt( len( results ) ) )
+            
+            self._example_results.addTab( results_list, tab_label )
+            
+            if stop_now:
+                
+                break
+                
+            
+        
+        if self._example_results.count() > current_selected_index:
+            
+            self._example_results.setCurrentIndex( current_selected_index )
+            
+        
+    
+    def GetResultText( self, step_index: int ):
+        
+        example_text = self._example_string.text()
+        
+        if 0 < step_index < self._example_results.count() + 1:
+            
+            try:
+                
+                t = self._example_results.widget( step_index - 1 ).item( 0 ).text()
+                
+                if t != NO_RESULTS_TEXT:
+                    
+                    example_text = t
+                    
+                
+            except:
+                
+                pass
+                
+            
+        
+        return example_text
+        
+    
+    def GetStartingText( self ):
+        
+        return self._example_string.text()
+        
+    
+    def SetStringProcessor( self, string_processor: ClientParsing.StringProcessor ):
+        
+        self._string_processor = string_processor
+        
+        if True in ( isinstance( processing_step, ClientParsing.StringSlicer ) for processing_step in self._string_processor.GetProcessingSteps() ):
+            
+            self.setToolTip( 'String Slicing is ignored here.' )
+            
+        else:
+            
+            self.setToolTip( '' )
+            
+        
+        self._UpdateResults()
+        
+    
+    def SetExampleString( self, example_string: str ):
+        
+        self._example_string.setText( example_string )
+        
+        self._UpdateResults()
+        
+    
 class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def __init__( self, parent: QW.QWidget, string_converter: ClientParsing.StringConverter, example_string_override = None ):
@@ -399,15 +680,21 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             self._data_text = QW.QLineEdit( self._control_panel )
             self._data_number = QP.MakeQSpinBox( self._control_panel, min=0, max=65535 )
             self._data_encoding = ClientGUICommon.BetterChoice( self._control_panel )
+            self._data_decoding = ClientGUICommon.BetterChoice( self._control_panel )
             self._data_regex_repl = QW.QLineEdit( self._control_panel )
             self._data_date_link = ClientGUICommon.BetterHyperLink( self._control_panel, 'link to date info', 'https://docs.python.org/3/library/datetime.html#strftime-strptime-behavior' )
             self._data_timezone_decode = ClientGUICommon.BetterChoice( self._control_panel )
             self._data_timezone_encode = ClientGUICommon.BetterChoice( self._control_panel )
             self._data_timezone_offset = QP.MakeQSpinBox( self._control_panel, min=-86400, max=86400 )
             
-            for e in ( 'hex', 'base64', 'url percent encoding' ):
+            for e in ( 'hex', 'base64', 'url percent encoding', 'unicode escape characters', 'html entities' ):
                 
                 self._data_encoding.addItem( e, e )
+                
+            
+            for e in ( 'url percent encoding', 'unicode escape characters', 'html entities' ):
+                
+                self._data_decoding.addItem( e, e )
                 
             
             self._data_timezone_decode.addItem( 'UTC', HC.TIMEZONE_GMT )
@@ -451,9 +738,13 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             #
             
-            if conversion_type in ( ClientParsing.STRING_CONVERSION_DECODE, ClientParsing.STRING_CONVERSION_ENCODE ):
+            if conversion_type == ClientParsing.STRING_CONVERSION_ENCODE:
                 
                 self._data_encoding.SetValue( data )
+                
+            elif conversion_type == ClientParsing.STRING_CONVERSION_DECODE:
+                
+                self._data_decoding.SetValue( data )
                 
             elif conversion_type == ClientParsing.STRING_CONVERSION_REGEX_SUB:
                 
@@ -497,7 +788,8 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             self._data_text_label = ClientGUICommon.BetterStaticText( self, 'string data: ' )
             self._data_number_label = ClientGUICommon.BetterStaticText( self, 'number data: ' )
-            self._data_encoding_label = ClientGUICommon.BetterStaticText( self, 'encoding data: ' )
+            self._data_encoding_label = ClientGUICommon.BetterStaticText( self, 'encoding type: ' )
+            self._data_decoding_label = ClientGUICommon.BetterStaticText( self, 'decoding type: ' )
             self._data_regex_repl_label = ClientGUICommon.BetterStaticText( self, 'regex replacement: ' )
             self._data_date_link_label = ClientGUICommon.BetterStaticText( self, 'date info: ' )
             self._data_timezone_decode_label = ClientGUICommon.BetterStaticText( self, 'date decode timezone: ' )
@@ -508,6 +800,7 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             rows.append( ( self._data_text_label, self._data_text ) )
             rows.append( ( self._data_number_label, self._data_number ) )
             rows.append( ( self._data_encoding_label, self._data_encoding ) )
+            rows.append( ( self._data_decoding_label, self._data_decoding ) )
             rows.append( ( self._data_regex_repl_label, self._data_regex_repl ) )
             rows.append( ( self._data_date_link_label, self._data_date_link ) )
             rows.append( ( self._data_timezone_decode_label, self._data_timezone_decode ) )
@@ -549,6 +842,7 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             self._data_text.textEdited.connect( self._UpdateExampleText )
             self._data_number.valueChanged.connect( self._UpdateExampleText )
             self._data_encoding.currentIndexChanged.connect( self._UpdateExampleText )
+            self._data_decoding.currentIndexChanged.connect( self._UpdateExampleText )
             self._data_regex_repl.textEdited.connect( self._UpdateExampleText )
             self._data_timezone_decode.currentIndexChanged.connect( self._UpdateExampleText )
             self._data_timezone_offset.valueChanged.connect( self._UpdateExampleText )
@@ -565,6 +859,7 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             self._data_text_label.setVisible( False )
             self._data_number_label.setVisible( False )
             self._data_encoding_label.setVisible( False )
+            self._data_decoding_label.setVisible( False )
             self._data_regex_repl_label.setVisible( False )
             self._data_date_link_label.setVisible( False )
             self._data_timezone_decode_label.setVisible( False )
@@ -574,6 +869,7 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             self._data_text.setVisible( False )
             self._data_number.setVisible( False )
             self._data_encoding.setVisible( False )
+            self._data_decoding.setVisible( False )
             self._data_regex_repl.setVisible( False )
             self._data_date_link.setVisible( False )
             self._data_timezone_decode.setVisible( False )
@@ -582,10 +878,15 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             conversion_type = self._conversion_type.GetValue()
             
-            if conversion_type in ( ClientParsing.STRING_CONVERSION_ENCODE, ClientParsing.STRING_CONVERSION_DECODE ):
+            if conversion_type == ClientParsing.STRING_CONVERSION_ENCODE:
                 
                 self._data_encoding_label.setVisible( True )
                 self._data_encoding.setVisible( True )
+                
+            elif conversion_type == ClientParsing.STRING_CONVERSION_DECODE:
+                
+                self._data_decoding_label.setVisible( True )
+                self._data_decoding.setVisible( True )
                 
             elif conversion_type in ( ClientParsing.STRING_CONVERSION_PREPEND_TEXT, ClientParsing.STRING_CONVERSION_APPEND_TEXT, ClientParsing.STRING_CONVERSION_DATE_DECODE, ClientParsing.STRING_CONVERSION_DATE_ENCODE, ClientParsing.STRING_CONVERSION_REGEX_SUB ):
                 
@@ -708,9 +1009,13 @@ class EditStringConverterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             conversion_type = self._conversion_type.GetValue()
             
-            if conversion_type in ( ClientParsing.STRING_CONVERSION_ENCODE, ClientParsing.STRING_CONVERSION_DECODE ):
+            if conversion_type == ClientParsing.STRING_CONVERSION_ENCODE:
                 
                 data = self._data_encoding.GetValue()
+                
+            elif conversion_type == ClientParsing.STRING_CONVERSION_DECODE:
+                
+                data = self._data_decoding.GetValue()
                 
             elif conversion_type in ( ClientParsing.STRING_CONVERSION_PREPEND_TEXT, ClientParsing.STRING_CONVERSION_APPEND_TEXT ):
                 
@@ -916,7 +1221,7 @@ class EditStringMatchPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if match_type == ClientParsing.STRING_MATCH_FIXED:
             
-            self._example_string_matches.setText( '' )
+            self._example_string_matches.clear()
             
         else:
             
@@ -984,6 +1289,353 @@ class EditStringMatchPanel( ClientGUIScrolledPanels.EditPanel ):
         self._example_string.setText( example_string )
         
         self._UpdateControlVisibility()
+        
+    
+SELECT_SINGLE = 0
+SELECT_RANGE = 1
+
+class EditStringSlicerPanel( ClientGUIScrolledPanels.EditPanel ):
+    
+    def __init__( self, parent, string_slicer: ClientParsing.StringSlicer, test_data: typing.Sequence[ str ] = [] ):
+        
+        ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        
+        #
+        
+        self._controls_panel = ClientGUICommon.StaticBox( self, 'selector values' )
+        
+        self._select_type = ClientGUICommon.BetterChoice( self._controls_panel )
+        
+        self._select_type.addItem( 'select one item', SELECT_SINGLE )
+        self._select_type.addItem( 'select range', SELECT_RANGE )
+        
+        self._single_panel = QW.QWidget( self._controls_panel )
+        
+        self._index_single = QP.MakeQSpinBox( self._single_panel, min = -65536, max = 65536 )
+        
+        self._range_panel = QW.QWidget( self._controls_panel )
+        
+        self._index_start = ClientGUICommon.NoneableSpinCtrl( self._range_panel, none_phrase = 'start at the beginning', min = -65536, max = 65536)
+        self._index_end = ClientGUICommon.NoneableSpinCtrl( self._range_panel, none_phrase = 'finish at the end', min = -65536, max = 65536)
+        
+        self._summary_st = ClientGUICommon.BetterStaticText( self._controls_panel )
+        
+        #
+        
+        self._example_panel = ClientGUICommon.StaticBox( self, 'test results' )
+        
+        self._example_strings = QW.QListWidget( self._example_panel )
+        self._example_strings.setSelectionMode( QW.QListWidget.NoSelection )
+        
+        self._example_strings_sliced = QW.QListWidget( self._example_panel )
+        self._example_strings_sliced.setSelectionMode( QW.QListWidget.NoSelection )
+        
+        #
+        
+        for s in test_data:
+            
+            self._example_strings.addItem( s )
+            
+        
+        self.SetValue( string_slicer )
+        
+        #
+        
+        rows = []
+        
+        rows.append( ( 'index to select: ', self._index_single ) )
+        
+        gridbox = ClientGUICommon.WrapInGrid( self._single_panel, rows )
+        
+        self._single_panel.setLayout( gridbox )
+        
+        rows = []
+        
+        rows.append( ( 'starting index: ', self._index_start ) )
+        rows.append( ( 'ending index: ', self._index_end ) )
+        
+        gridbox = ClientGUICommon.WrapInGrid( self._range_panel, rows )
+        
+        self._range_panel.setLayout( gridbox )
+        
+        st = ClientGUICommon.BetterStaticText( self._controls_panel, label = 'Negative indices are ok! Check the summary text to make sure your numbers are correct!' )
+        
+        st.setWordWrap( True )
+        
+        self._controls_panel.Add( st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._controls_panel.Add( self._select_type, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._controls_panel.Add( self._single_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._controls_panel.Add( self._range_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._controls_panel.Add( self._summary_st, CC.FLAGS_CENTER )
+        
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, self._example_strings, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( hbox, self._example_strings_sliced, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self._example_panel.Add( hbox, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, self._controls_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._example_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self.widget().setLayout( vbox )
+        
+        #
+        
+        self.SetValue( string_slicer )
+        
+        self._select_type.currentIndexChanged.connect( self._ShowHideControls )
+        
+        self._index_single.valueChanged.connect( self._UpdateControls )
+        self._index_start.valueChanged.connect( self._UpdateControls )
+        self._index_end.valueChanged.connect( self._UpdateControls )
+        
+    
+    def _GetValue( self ):
+        
+        select_type = self._select_type.GetValue()
+        
+        if select_type == SELECT_SINGLE:
+            
+            index_start = self._index_single.value()
+            
+            if index_start == -1:
+                
+                index_end = None
+                
+            else:
+                
+                index_end = index_start + 1
+                
+            
+        elif select_type == SELECT_RANGE:
+            
+            index_start = self._index_start.GetValue()
+            index_end = self._index_end.GetValue()
+            
+        
+        string_slicer = ClientParsing.StringSlicer( index_start = index_start, index_end = index_end )
+        
+        return string_slicer
+        
+    
+    def _ShowHideControls( self ):
+        
+        select_type = self._select_type.GetValue()
+        
+        self._single_panel.setVisible( select_type == SELECT_SINGLE )
+        self._range_panel.setVisible( select_type == SELECT_RANGE )
+        
+        self._UpdateControls()
+        
+    
+    def _UpdateControls( self ):
+        
+        string_slicer = self._GetValue()
+        
+        self._summary_st.setText( string_slicer.ToString() )
+        
+        texts = [ self._example_strings.item( i ).text() for i in range( self._example_strings.count() ) ]
+        
+        try:
+            
+            sliced_texts = string_slicer.Slice( texts )
+            
+        except Exception as e:
+            
+            sliced_texts = [ 'Error: {}'.format( e ) ]
+            
+        
+        self._example_strings_sliced.clear()
+        
+        for s in sliced_texts:
+            
+            self._example_strings_sliced.addItem( s )
+            
+        
+    
+    def GetValue( self ):
+        
+        string_slicer = self._GetValue()
+        
+        return string_slicer
+        
+    
+    def SetValue( self, string_slicer: ClientParsing.StringSlicer ):
+        
+        ( index_start, index_end ) = string_slicer.GetIndexStartEnd()
+        
+        self._index_single.setValue( index_start if index_start is not None else 0 )
+        
+        self._index_start.SetValue( index_start )
+        self._index_end.SetValue( index_end )
+        
+        if string_slicer.SelectsOne():
+            
+            self._select_type.SetValue( SELECT_SINGLE )
+            
+        else:
+            
+            self._select_type.SetValue( SELECT_RANGE )
+            
+        
+        self._ShowHideControls()
+        
+    
+class EditStringSorterPanel( ClientGUIScrolledPanels.EditPanel ):
+    
+    def __init__( self, parent, string_sorter: ClientParsing.StringSorter, test_data: typing.Sequence[ str ] = [] ):
+        
+        ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        
+        #
+        
+        self._controls_panel = ClientGUICommon.StaticBox( self, 'sort values' )
+        
+        self._sort_type = ClientGUICommon.BetterChoice( self._controls_panel )
+        
+        self._sort_type.addItem( ClientParsing.sort_str_enum[ ClientParsing.CONTENT_PARSER_SORT_TYPE_HUMAN_SORT ], ClientParsing.CONTENT_PARSER_SORT_TYPE_HUMAN_SORT )
+        self._sort_type.addItem( ClientParsing.sort_str_enum[ ClientParsing.CONTENT_PARSER_SORT_TYPE_LEXICOGRAPHIC ], ClientParsing.CONTENT_PARSER_SORT_TYPE_LEXICOGRAPHIC )
+        
+        tt = 'Human sort sorts numbers as you understand them. "image 2" comes before "image 10". Lexicographic compares each character in turn. "image 02" comes before "image 10", which comes before "image 2".'
+        
+        self._asc = QW.QCheckBox( self._controls_panel )
+        
+        self._regex = ClientGUICommon.NoneableTextCtrl( self._controls_panel, none_phrase = 'use whole string' )
+        
+        tt = 'If you want to sort by a substring, for instance a number in a longer string, you can place a regex here like \'\\d+\' just to capture and sort by that number. It does not affect the final strings, just what it compared for sort.'
+        
+        self._regex.setToolTip( tt )
+        
+        #
+        
+        self._example_panel = ClientGUICommon.StaticBox( self, 'test results' )
+        
+        self._example_strings = QW.QListWidget( self._example_panel )
+        self._example_strings.setSelectionMode( QW.QListWidget.NoSelection )
+        
+        self._example_strings_sorted = QW.QListWidget( self._example_panel )
+        self._example_strings_sorted.setSelectionMode( QW.QListWidget.NoSelection )
+        
+        #
+        
+        for s in test_data:
+            
+            self._example_strings.addItem( s )
+            
+        
+        self.SetValue( string_sorter )
+        
+        #
+        
+        rows = []
+        
+        rows.append( ( 'sort type: ', self._sort_type ) )
+        rows.append( ( 'ascending: ', self._asc ) )
+        rows.append( ( 'regex for substring sorting: ', self._regex ) )
+        
+        gridbox = ClientGUICommon.WrapInGrid( self._controls_panel, rows )
+        
+        self._controls_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, self._example_strings, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( hbox, self._example_strings_sorted, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self._example_panel.Add( hbox, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, self._controls_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._example_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self.widget().setLayout( vbox )
+        
+        #
+        
+        self._sort_type.currentIndexChanged.connect( self._UpdateControls )
+        self._asc.stateChanged.connect( self._UpdateControls )
+        self._regex.valueChanged.connect( self._UpdateControls )
+        
+    
+    def _GetValue( self ):
+        
+        sort_type = self._sort_type.GetValue()
+        asc = self._asc.isChecked()
+        regex = self._regex.GetValue()
+        
+        string_sorter = ClientParsing.StringSorter( sort_type = sort_type, asc = asc, regex = regex )
+        
+        return string_sorter
+        
+    
+    def _UpdateControls( self ):
+        
+        string_sorter = self._GetValue()
+        
+        texts = [ self._example_strings.item( i ).text() for i in range( self._example_strings.count() ) ]
+        
+        try:
+            
+            sorted_texts = string_sorter.Sort( texts )
+            
+        except Exception as e:
+            
+            sorted_texts = [ 'Error: {}'.format( e ) ]
+            
+        
+        self._example_strings_sorted.clear()
+        
+        regex = self._regex.GetValue()
+        
+        for s in sorted_texts:
+            
+            if regex is not None:
+                
+                try:
+                    
+                    m = re.search( regex, s )
+                    
+                    if m is None:
+                        
+                        s = '{} (no regex match)'.format( s )
+                        
+                    else:
+                        
+                        s = '{} (regex: {})'.format( s, m.group() )
+                        
+                    
+                except:
+                    
+                    pass
+                    
+                
+            
+            self._example_strings_sorted.addItem( s )
+            
+        
+    
+    def GetValue( self ):
+        
+        string_sorter = self._GetValue()
+        
+        return string_sorter
+        
+    
+    def SetValue( self, string_sorter: ClientParsing.StringSorter ):
+        
+        sort_type = string_sorter.GetSortType()
+        asc = string_sorter.GetAscending()
+        regex = string_sorter.GetRegex()
+        
+        self._sort_type.SetValue( sort_type )
+        self._asc.setChecked( asc )
+        self._regex.SetValue( regex )
+        
+        self._UpdateControls()
         
     
 class EditStringSplitterPanel( ClientGUIScrolledPanels.EditPanel ):
@@ -1075,9 +1727,9 @@ class EditStringSplitterPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def GetValue( self ):
         
-        string_match = self._GetValue()
+        string_splitter = self._GetValue()
         
-        return string_match
+        return string_splitter
         
     
     def SetValue( self, string_splitter: ClientParsing.StringSplitter ):
@@ -1093,8 +1745,6 @@ class EditStringSplitterPanel( ClientGUIScrolledPanels.EditPanel ):
     
 class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
     
-    NO_RESULTS_TEXT = 'no results'
-    
     def __init__( self, parent, string_processor: ClientParsing.StringProcessor, test_data: ClientParsing.ParsingTestData ):
         
         ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
@@ -1109,9 +1759,11 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._example_panel = ClientGUICommon.StaticBox( self, 'test results' )
         
-        self._example_string = QW.QLineEdit( self._example_panel )
+        self._multiline_test_panel = MultilineStringConversionTestPanel( self._example_panel, string_processor )
         
-        self._example_results = ClientGUICommon.BetterNotebook( self._example_panel )
+        self._single_test_panel = SingleStringConversionTestPanel( self._example_panel, string_processor )
+        
+        #
         
         ( w, h ) = ClientGUIFunctions.ConvertTextToPixels( self._example_panel, ( 64, 24 ) )
         
@@ -1119,41 +1771,31 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
-        if len( test_data.texts ) > 0:
-            
-            example_string = test_data.texts[0]
-            
-        else:
-            example_string = ''
-            
-        
-        self._example_string.setText( example_string )
+        self._controls_panel.Add( self._processing_steps, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
         
         #
         
-        self._controls_panel.Add( self._processing_steps, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        example_hbox = QP.HBoxLayout()
         
-        rows = []
+        QP.AddToLayout( example_hbox, self._multiline_test_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( example_hbox, self._single_test_panel, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
         
-        rows.append( ( 'example string: ', self._example_string ) )
+        self._example_panel.Add( example_hbox, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
         
-        gridbox = ClientGUICommon.WrapInGrid( self._example_panel, rows )
+        vbox = QP.VBoxLayout()
         
-        self._example_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        self._example_panel.Add( ClientGUICommon.BetterStaticText( self, label = 'result:' ), CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._example_panel.Add( self._example_results, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._controls_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._example_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         
-        hbox = QP.VBoxLayout()
-        
-        QP.AddToLayout( hbox, self._controls_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
-        QP.AddToLayout( hbox, self._example_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
-        
-        self.widget().setLayout( hbox )
+        self.widget().setLayout( vbox )
         
         #
         
         self._processing_steps.listBoxChanged.connect( self._UpdateControls )
-        self._example_string.textChanged.connect( self._UpdateControls )
+        
+        self._multiline_test_panel.textSelected.connect( self._single_test_panel.SetExampleString )
+        
+        self._multiline_test_panel.SetTestData( test_data )
         
         self.SetValue( string_processor )
         
@@ -1163,7 +1805,9 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
         choice_tuples = [
             ( 'String Match', ClientParsing.StringMatch, 'An object that filters strings.' ),
             ( 'String Converter', ClientParsing.StringConverter, 'An object that converts strings from one thing to another.' ),
-            ( 'String Splitter', ClientParsing.StringSplitter, 'An object that breaks strings into smaller strings.' )
+            ( 'String Splitter', ClientParsing.StringSplitter, 'An object that breaks strings into smaller strings.' ),
+            ( 'String Sorter', ClientParsing.StringSorter, 'An object that sorts strings.' ),
+            ( 'String Selector/Slicer', ClientParsing.StringSlicer, 'An object that filter-selects from the list of strings. Either absolute index position or a range.' )
         ]
         
         try:
@@ -1177,7 +1821,9 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if string_processing_step_type == ClientParsing.StringMatch:
             
-            string_processing_step = ClientParsing.StringMatch( example_string = self._example_string.text() )
+            example_text = self._single_test_panel.GetStartingText()
+            
+            string_processing_step = ClientParsing.StringMatch( example_string = example_text )
             
             example_text = self._GetExampleTextForStringProcessingStep( string_processing_step )
             
@@ -1211,6 +1857,18 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 panel = EditStringSplitterPanel( dlg, string_processing_step, example_string = example_text )
                 
+            elif isinstance( string_processing_step, ClientParsing.StringSorter ):
+                
+                test_data = self._GetExampleTextsForStringSorter( string_processing_step )
+                
+                panel = EditStringSorterPanel( dlg, string_processing_step, test_data = test_data )
+                
+            elif isinstance( string_processing_step, ClientParsing.StringSlicer ):
+                
+                test_data = self._GetExampleTextsForStringSorter( string_processing_step )
+                
+                panel = EditStringSlicerPanel( dlg, string_processing_step, test_data = test_data )
+                
             
             dlg.SetPanel( panel )
             
@@ -1234,6 +1892,28 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _GetExampleTextForStringProcessingStep( self, string_processing_step: ClientParsing.StringProcessingStep ):
         
+        # ultimately rework this to multiline test_data m8, but the panels need it first
+        
+        current_string_processor = self._GetValue()
+        
+        current_string_processing_steps = current_string_processor.GetProcessingSteps()
+        
+        if string_processing_step in current_string_processing_steps:
+            
+            example_text_index = current_string_processing_steps.index( string_processing_step )
+            
+        else:
+            
+            example_text_index = len( current_string_processing_steps )
+            
+        
+        example_text = self._single_test_panel.GetResultText( example_text_index )
+        
+        return example_text
+        
+    
+    def _GetExampleTextsForStringSorter( self, string_processing_step: ClientParsing.StringProcessingStep ):
+        
         # ultimately rework this to multiline test_data m8
         
         current_string_processor = self._GetValue()
@@ -1249,26 +1929,9 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
             example_text_index = len( current_string_processing_steps )
             
         
-        example_text = self._example_string.text()
+        example_texts = self._multiline_test_panel.GetResultTexts( example_text_index )
         
-        if 0 < example_text_index < self._example_results.count() + 1:
-            
-            try:
-                
-                t = self._example_results.widget( example_text_index - 1 ).item( 0 ).text()
-                
-                if t != self.NO_RESULTS_TEXT:
-                    
-                    example_text = t
-                    
-                
-            except:
-                
-                pass
-                
-            
-        
-        return example_text
+        return example_texts
         
     
     def _GetValue( self ):
@@ -1286,65 +1949,8 @@ class EditStringProcessorPanel( ClientGUIScrolledPanels.EditPanel ):
         
         string_processor = self._GetValue()
         
-        processing_steps = string_processor.GetProcessingSteps()
-        
-        current_selected_index = self._example_results.currentIndex()
-        
-        self._example_results.DeleteAllPages()
-        
-        example_string = self._example_string.text()
-        
-        stop_now = False
-        
-        for i in range( len( processing_steps ) ):
-            
-            try:
-                
-                results = string_processor.ProcessStrings( [ example_string ], max_steps_allowed = i + 1 )
-                
-            except Exception as e:
-                
-                results = [ 'error: {}'.format( str( e ) ) ]
-                
-                stop_now = True
-                
-            
-            results_list = QW.QListWidget( self._example_panel )
-            results_list.setSelectionMode( QW.QListWidget.NoSelection )  
-            
-            if len( results ) == 0:
-                
-                results_list.addItem( self.NO_RESULTS_TEXT )
-                
-                stop_now = True
-                
-            else:
-                
-                for result in results:
-                    
-                    if not isinstance( result, str ):
-                        
-                        result = repr( result )
-                        
-                    
-                    results_list.addItem( result )
-                    
-                
-            
-            tab_label = '{} ({})'.format( processing_steps[i].ToString( simple = True ), HydrusData.ToHumanInt( len( results ) ) )
-            
-            self._example_results.addTab( results_list, tab_label )
-            
-            if stop_now:
-                
-                break
-                
-            
-        
-        if self._example_results.count() > current_selected_index:
-            
-            self._example_results.setCurrentIndex( current_selected_index )
-            
+        self._multiline_test_panel.SetStringProcessor( string_processor )
+        self._single_test_panel.SetStringProcessor( string_processor )
         
     
     def GetValue( self ):

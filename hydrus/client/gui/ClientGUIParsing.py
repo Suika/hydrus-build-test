@@ -1,4 +1,5 @@
 import itertools
+import json
 import os
 import sys
 import threading
@@ -12,7 +13,9 @@ from qtpy import QtGui as QG
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
+from hydrus.core import HydrusFileHandling
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusText
 
@@ -22,11 +25,9 @@ from hydrus.client import ClientParsing
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSerialisable
 from hydrus.client import ClientThreading
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIMenus
-from hydrus.client.gui import ClientGUIControls
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -38,6 +39,10 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.networking import ClientGUINetworkJobControl
+from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.gui.widgets import ClientGUIControls
+from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.networking import ClientNetworkingContexts
 from hydrus.client.networking import ClientNetworkingDomain
 from hydrus.client.networking import ClientNetworkingJobs
@@ -57,7 +62,7 @@ class DownloaderExportPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         menu_items.append( ( 'normal', 'open the downloader sharing help', 'Open the help page for sharing downloaders in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -499,7 +504,7 @@ class EditCompoundFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the compound formula help', 'Open the help page for compound formulae in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -731,7 +736,7 @@ class EditContextVariableFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the context variable formula help', 'Open the help page for context variable formulae in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -956,7 +961,7 @@ class EditFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if self._current_formula is None:
             
-            self._formula_description.setPlainText( '' )
+            self._formula_description.clear()
             
             self._edit_formula.setEnabled( False )
             self._change_formula_type.setEnabled( False )
@@ -1178,7 +1183,7 @@ class EditHTMLFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the html formula help', 'Open the help page for html formulae in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -1535,7 +1540,7 @@ class EditJSONFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the json formula help', 'Open the help page for json formulae in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -1770,7 +1775,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the content parsers help', 'Open the help page for content parsers in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -1802,7 +1807,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         for permitted_content_type in permitted_content_types:
             
-            self._content_type.addItem( types_to_str[ permitted_content_type], permitted_content_type )
+            self._content_type.addItem( types_to_str[ permitted_content_type ], permitted_content_type )
             
         
         self._content_type.currentIndexChanged.connect( self.EventContentTypeChange )
@@ -1832,6 +1837,13 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
             self._hash_type.addItem( hash_type, hash_type )
             
         
+        self._hash_encoding = ClientGUICommon.BetterChoice( self._hash_panel )
+        
+        for hash_encoding in ( 'hex', 'base64' ):
+            
+            self._hash_encoding.addItem( hash_encoding, hash_encoding )
+            
+        
         self._timestamp_panel = QW.QWidget( self._content_panel )
         
         self._timestamp_type = ClientGUICommon.BetterChoice( self._timestamp_panel )
@@ -1852,20 +1864,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._temp_variable_name = QW.QLineEdit( self._temp_variable_panel )
         
-        self._sort_type = ClientGUICommon.BetterChoice( self._content_panel )
-        
-        self._sort_type.addItem( 'do not sort formula text results', ClientParsing.CONTENT_PARSER_SORT_TYPE_NONE )
-        self._sort_type.addItem( 'sort by human-friendly lexicographic', ClientParsing.CONTENT_PARSER_SORT_TYPE_HUMAN_SORT )
-        self._sort_type.addItem( 'sort by strict lexicographic', ClientParsing.CONTENT_PARSER_SORT_TYPE_LEXICOGRAPHIC )
-        
-        self._sort_type.currentIndexChanged.connect( self.EventSortTypeChange )
-        
-        self._sort_asc = ClientGUICommon.BetterChoice( self._content_panel )
-        
-        self._sort_asc.addItem( 'sort ascending', True )
-        self._sort_asc.addItem( 'sort descending', False )
-        
-        ( name, content_type, formula, sort_type, sort_asc, additional_info ) = content_parser.ToTuple()
+        ( name, content_type, formula, additional_info ) = content_parser.ToTuple()
         
         self._formula = EditFormulaPanel( self._edit_panel, formula, self._test_panel.GetTestDataForChild )
         
@@ -1890,9 +1889,10 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
             
         elif content_type == HC.CONTENT_TYPE_HASH:
             
-            hash_type = additional_info
+            ( hash_type, hash_encoding ) = additional_info
             
             self._hash_type.SetValue( hash_type )
+            self._hash_encoding.SetValue( hash_encoding )
             
         elif content_type == HC.CONTENT_TYPE_TIMESTAMP:
             
@@ -1920,9 +1920,6 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
             self._temp_variable_name.setText( temp_variable_name )
             
         
-        self._sort_type.SetValue( sort_type )
-        self._sort_asc.SetValue( sort_asc )
-        
         #
         
         rows = []
@@ -1949,6 +1946,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         rows = []
         
         rows.append( ( 'hash type: ', self._hash_type ) )
+        rows.append( ( 'hash encoding: ', self._hash_encoding ) )
         
         gridbox = ClientGUICommon.WrapInGrid( self._hash_panel, rows )
         
@@ -2019,8 +2017,6 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         self._content_panel.Add( self._title_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._content_panel.Add( self._veto_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._content_panel.Add( self._temp_variable_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        self._content_panel.Add( self._sort_type, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._content_panel.Add( self._sort_asc, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
         
@@ -2055,7 +2051,6 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         self.widget().setLayout( vbox )
         
         self.EventContentTypeChange( None )
-        self.EventSortTypeChange( None )
         
     
     def EventContentTypeChange( self, index ):
@@ -2100,20 +2095,6 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
             
         
     
-    def EventSortTypeChange( self, event ):
-        
-        choice = self._sort_type.GetValue()
-        
-        if choice == ClientParsing.CONTENT_PARSER_SORT_TYPE_NONE:
-            
-            self._sort_asc.setEnabled( False )            
-            
-        else:
-            
-            self._sort_asc.setEnabled( True )
-            
-        
-    
     def GetValue( self ):
         
         name = self._name.text()
@@ -2121,9 +2102,6 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         content_type = self._content_type.GetValue()
         
         formula = self._formula.GetValue()
-        
-        sort_type = self._sort_type.GetValue()
-        sort_asc = self._sort_asc.GetValue()
         
         if content_type == HC.CONTENT_TYPE_URLS:
             
@@ -2141,8 +2119,9 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         elif content_type == HC.CONTENT_TYPE_HASH:
             
             hash_type = self._hash_type.GetValue()
+            hash_encoding = self._hash_encoding.GetValue()
             
-            additional_info = hash_type
+            additional_info = ( hash_type, hash_encoding )
             
         elif content_type == HC.CONTENT_TYPE_TIMESTAMP:
             
@@ -2170,7 +2149,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
             additional_info = temp_variable_name
             
         
-        content_parser = ClientParsing.ContentParser( name = name, content_type = content_type, formula = formula, sort_type = sort_type, sort_asc = sort_asc, additional_info = additional_info )
+        content_parser = ClientParsing.ContentParser( name = name, content_type = content_type, formula = formula, additional_info = additional_info )
         
         return content_parser
         
@@ -2343,7 +2322,7 @@ class EditNodes( QW.QWidget ):
         menu_items.append( ( 'normal', 'content node', 'A node that parses the given data for content.', self.AddContentNode ) )
         menu_items.append( ( 'normal', 'link node', 'A node that parses the given data for a link, which it then pursues.', self.AddLinkNode ) )
         
-        self._add_button = ClientGUICommon.MenuButton( self, 'add', menu_items )
+        self._add_button = ClientGUIMenuButton.MenuButton( self, 'add', menu_items )
         
         self._copy_button = ClientGUICommon.BetterButton( self, 'copy', self.Copy )
         
@@ -2854,7 +2833,7 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items.append( ( 'normal', 'open the page parser help', 'Open the help page for page parsers in your web browser.', page_func ) )
         
-        help_button = ClientGUICommon.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
+        help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
         help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
         
@@ -2887,7 +2866,7 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         self._test_url = QW.QLineEdit( test_url_fetch_panel )
         self._test_referral_url = QW.QLineEdit( test_url_fetch_panel )
         self._fetch_example_data = ClientGUICommon.BetterButton( test_url_fetch_panel, 'fetch test data from url', self._FetchExampleData )
-        self._test_network_job_control = ClientGUIControls.NetworkJobControl( test_url_fetch_panel )
+        self._test_network_job_control = ClientGUINetworkJobControl.NetworkJobControl( test_url_fetch_panel )
         
         if formula is None:
             
@@ -3173,7 +3152,7 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         def wait_and_do_it( network_job ):
             
-            def qt_tidy_up( example_data ):
+            def qt_tidy_up( example_data, example_bytes, error ):
                 
                 if not self or not QP.isValid( self ):
                     
@@ -3187,10 +3166,18 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 self._test_panel.SetExampleParsingContext( example_parsing_context )
                 
-                self._test_panel.SetExampleData( example_data )
+                self._test_panel.SetExampleData( example_data, example_bytes = example_bytes )
                 
                 self._test_network_job_control.ClearNetworkJob()
                 
+                if error is not None:
+                    
+                    self._test_network_job_control.SetError( error )
+                    
+                
+            
+            example_bytes = None
+            error = None
             
             try:
                 
@@ -3198,18 +3185,29 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 example_data = network_job.GetContentText()
                 
+                example_bytes = network_job.GetContentBytes()
+                
             except HydrusExceptions.CancelledException:
                 
                 example_data = 'fetch cancelled'
                 
             except Exception as e:
                 
-                example_data = 'fetch failed:' + os.linesep * 2 + str( e )
+                error = traceback.format_exc()
                 
-                HydrusData.ShowException( e )
+                try:
+                    
+                    stuff_read = network_job.GetContentText()
+                    
+                except:
+                    
+                    stuff_read = 'no response'
+                    
+                
+                example_data = 'fetch failed: {}'.format( e ) + os.linesep * 2 + stuff_read
                 
             
-            QP.CallAfter( qt_tidy_up, example_data )
+            QP.CallAfter( qt_tidy_up, example_data, example_bytes, error )
             
         
         url = self._test_url.text()
@@ -3222,6 +3220,9 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         network_job = ClientNetworkingJobs.NetworkJob( 'GET', url, referral_url = referral_url )
         
+        network_job.OnlyTryConnectionOnce()
+        
+        self._test_network_job_control.ClearError()
         self._test_network_job_control.SetNetworkJob( network_job )
         
         network_job.OverrideBandwidth()
@@ -3735,21 +3736,21 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         menu_items.append( ( 'normal', 'file lookup script', 'A script that fetches content for a known file.', self.AddFileLookupScript ) )
         
-        self._add_button = ClientGUICommon.MenuButton( self, 'add', menu_items )
+        self._add_button = ClientGUIMenuButton.MenuButton( self, 'add', menu_items )
         
         menu_items = []
         
         menu_items.append( ( 'normal', 'to clipboard', 'Serialise the script and put it on your clipboard.', self.ExportToClipboard ) )
         menu_items.append( ( 'normal', 'to png', 'Serialise the script and encode it to an image file you can easily share with other hydrus users.', self.ExportToPNG ) )
         
-        self._export_button = ClientGUICommon.MenuButton( self, 'export', menu_items )
+        self._export_button = ClientGUIMenuButton.MenuButton( self, 'export', menu_items )
         
         menu_items = []
         
         menu_items.append( ( 'normal', 'from clipboard', 'Load a script from text in your clipboard.', self.ImportFromClipboard ) )
         menu_items.append( ( 'normal', 'from png', 'Load a script from an encoded png.', self.ImportFromPNG ) )
         
-        self._import_button = ClientGUICommon.MenuButton( self, 'import', menu_items )
+        self._import_button = ClientGUIMenuButton.MenuButton( self, 'import', menu_items )
         
         self._duplicate_button = ClientGUICommon.BetterButton( self, 'duplicate', self.Duplicate )
         
@@ -4090,7 +4091,7 @@ class ScriptManagementControl( QW.QWidget ):
     
     def _Reset( self ):
         
-        self._status.setText( '' )
+        self._status.clear()
         self._gauge.SetRange( 1 )
         self._gauge.SetValue( 0 )
         
@@ -4318,7 +4319,7 @@ class TestPanel( QW.QWidget ):
     
     def _FetchFromURL( self ):
         
-        def qt_code( example_data ):
+        def qt_code( example_data, example_bytes ):
             
             if not self or not QP.isValid( self ):
                 
@@ -4332,7 +4333,7 @@ class TestPanel( QW.QWidget ):
             
             self._example_parsing_context.SetValue( example_parsing_context )
             
-            self._SetExampleData( example_data )
+            self._SetExampleData( example_data, example_bytes = example_bytes )
             
         
         def do_it( url ):
@@ -4343,11 +4344,15 @@ class TestPanel( QW.QWidget ):
             
             HG.client_controller.network_engine.AddJob( network_job )
             
+            example_bytes = None
+            
             try:
                 
                 network_job.WaitUntilDone()
                 
                 example_data = network_job.GetContentText()
+                
+                example_bytes = network_job.GetContentBytes()
                 
             except HydrusExceptions.CancelledException:
                 
@@ -4360,7 +4365,7 @@ class TestPanel( QW.QWidget ):
                 HydrusData.ShowException( e )
                 
             
-            QP.CallAfter( qt_code, example_data )
+            QP.CallAfter( qt_code, example_data, example_bytes )
             
         
         message = 'Enter URL to fetch data for.'
@@ -4382,6 +4387,15 @@ class TestPanel( QW.QWidget ):
             
             raw_text = HG.client_controller.GetClipboardText()
             
+            try:
+                
+                raw_bytes = raw_text.decode( 'utf-8' )
+                
+            except:
+                
+                raw_bytes = None
+                
+            
         except HydrusExceptions.DataMissing as e:
             
             QW.QMessageBox.critical( self, 'Error', str(e) )
@@ -4389,49 +4403,131 @@ class TestPanel( QW.QWidget ):
             return
             
         
-        self._SetExampleData( raw_text )
+        self._SetExampleData( raw_text, example_bytes = raw_bytes )
         
     
-    def _SetExampleData( self, example_data ):
+    def _SetExampleData( self, example_data, example_bytes = None ):
         
         self._example_data_raw = example_data
         
+        test_parse_ok = True
+        looked_like_json = False
+        
+        MAX_CHARS_IN_PREVIEW = 1024 * 64
+        
         if len( example_data ) > 0:
             
-            parse_phrase = 'uncertain data type'
+            good_type_found = True
             
-            # can't just throw this at bs4 to see if it 'works', as it'll just wrap any unparsable string in some bare <html><body><p> tags
-            if HydrusText.LooksLikeHTML( example_data ):
-                
-                parse_phrase = 'looks like HTML'
-                
-            
-            # put this second, so if the JSON contains some HTML, it'll overwrite here. decent compromise
             if HydrusText.LooksLikeJSON( example_data ):
+                
+                # prioritise this, so if the JSON contains some HTML, it'll overwrite here. decent compromise
+                
+                looked_like_json = True
                 
                 parse_phrase = 'looks like JSON'
                 
-            
-            description = HydrusData.ToHumanBytes( len( example_data ) ) + ' total, ' + parse_phrase
-            
-            if len( example_data ) > 1024:
+            elif HydrusText.LooksLikeHTML( example_data ):
                 
-                preview = 'PREVIEW:' + os.linesep + str( example_data[:1024] )
+                # can't just throw this at bs4 to see if it 'works', as it'll just wrap any unparsable string in some bare <html><body><p> tags
+                
+                parse_phrase = 'looks like HTML'
                 
             else:
                 
-                preview = example_data
+                good_type_found = False
+                
+                if example_bytes is not None:
+                    
+                    ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
+                    
+                    try:
+                        
+                        with open( temp_path, 'wb' ) as f:
+                            
+                            f.write( example_bytes )
+                            
+                        
+                        mime = HydrusFileHandling.GetMime( temp_path )
+                        
+                    except:
+                        
+                        mime = HC.APPLICATION_UNKNOWN
+                        
+                    finally:
+                        
+                        HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
+                        
+                    
+                else:
+                    
+                    mime = HC.APPLICATION_UNKNOWN
+                    
                 
             
-            self._test_parse.setEnabled( True )
+            if good_type_found:
+                
+                description = HydrusData.ToHumanBytes( len( example_data ) ) + ' total, ' + parse_phrase
+                
+                example_data_to_show = example_data
+                
+                if looked_like_json:
+                    
+                    try:
+                        
+                        j = HG.client_controller.parsing_cache.GetJSON( example_data )
+                        
+                        example_data_to_show = json.dumps( j, indent = 4 )
+                        
+                    except:
+                        
+                        pass
+                        
+                    
+                
+                if len( example_data_to_show ) > MAX_CHARS_IN_PREVIEW:
+                    
+                    preview = 'PREVIEW:' + os.linesep + str( example_data_to_show[:MAX_CHARS_IN_PREVIEW] )
+                    
+                else:
+                    
+                    preview = example_data_to_show
+                    
+                
+            else:
+                
+                if mime in HC.ALLOWED_MIMES:
+                    
+                    description = 'that looked like a {}!'.format( HC.mime_string_lookup[ mime ] )
+                    
+                    preview = 'no preview'
+                    
+                    test_parse_ok = False
+                    
+                else:
+                    
+                    description = 'that did not look like HTML or JSON, but will try to show it anyway'
+                    
+                    if len( example_data ) > MAX_CHARS_IN_PREVIEW:
+                        
+                        preview = 'PREVIEW:' + os.linesep + repr( example_data[:MAX_CHARS_IN_PREVIEW] )
+                        
+                    else:
+                        
+                        preview = repr( example_data )
+                        
+                    
+                
             
         else:
             
             description = 'no example data set yet'
             preview = ''
             
-            self._test_parse.setEnabled( False )
+            test_parse_ok = False
             
+        
+        self._test_parse.setEnabled( test_parse_ok )
         
         self._example_data_raw_description.setText( description )
         self._example_data_raw_preview.setPlainText( preview )
@@ -4454,9 +4550,9 @@ class TestPanel( QW.QWidget ):
         return self.GetTestData()
         
     
-    def SetExampleData( self, example_data ):
+    def SetExampleData( self, example_data, example_bytes = None ):
         
-        self._SetExampleData( example_data )
+        self._SetExampleData( example_data, example_bytes = example_bytes )
         
     
     def SetExampleParsingContext( self, example_parsing_context ):
@@ -4580,9 +4676,9 @@ class TestPanelPageParser( TestPanel ):
         self._SetExampleData( self._example_data_raw )
         
     
-    def _SetExampleData( self, example_data ):
+    def _SetExampleData( self, example_data, example_bytes = None ):
         
-        TestPanel._SetExampleData( self, example_data )
+        TestPanel._SetExampleData( self, example_data, example_bytes = example_bytes )
         
         pre_parsing_converter = self._pre_parsing_converter_callable()
         
@@ -4707,9 +4803,9 @@ class TestPanelPageParserSubsidiary( TestPanelPageParser ):
         HG.client_controller.pub( 'clipboard', 'text', joiner.join( self._example_data_post_separation ) )
         
     
-    def _SetExampleData( self, example_data ):
+    def _SetExampleData( self, example_data, example_bytes = None ):
         
-        TestPanelPageParser._SetExampleData( self, example_data )
+        TestPanelPageParser._SetExampleData( self, example_data, example_bytes = example_bytes )
         
         formula = self._formula_callable()
         

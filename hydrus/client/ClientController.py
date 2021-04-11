@@ -17,16 +17,15 @@ from hydrus.core import HydrusController
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNetworking
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusThreading
 from hydrus.core import HydrusVideoHandling
+from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientAPI
 from hydrus.client import ClientCaches
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientDB
 from hydrus.client import ClientDaemons
 from hydrus.client import ClientDefaults
 from hydrus.client import ClientDownloading
@@ -36,6 +35,7 @@ from hydrus.client import ClientOptions
 from hydrus.client import ClientSearch
 from hydrus.client import ClientServices
 from hydrus.client import ClientThreading
+from hydrus.client.db import ClientDB
 from hydrus.client.gui import ClientGUI
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIScrolledPanelsManagement
@@ -121,16 +121,36 @@ class App( QW.QApplication ):
         
         self.pubsub_catcher = PubSubEventCatcher( self, self._pubsub )
         
-        self.aboutToQuit.connect( self.EventEndSession )
+        self.aboutToQuit.connect( self.EventAboutToQuit )
         
     
-    def EventEndSession( self ):
+    def EventAboutToQuit( self ):
         
         # If a user log-off causes the OS to call the Qt Application's quit/exit func, we still want to save and close nicely
+        # once this lad is done, we are OUT of the mainloop, so if this is called and we are actually waiting on THREADExitEverything, let's wait a bit more
+        
+        # on Windows, the logoff routine kills the process once all top level windows are dead, so we have no chance to do post-app work lmaooooooooo
+        # since splash screen may not appear in some cases, I now keep main gui alive but hidden until the quit call. it is never deleteLater'd
+        
+        # this is also called explicitly right at the end of the program. I set setQuitonLastWindowClosed False and then call quit explicitly, so it needs to be idempotent on the exit calls
         
         if HG.client_controller is not None:
             
-            if not HG.client_controller.ProgramIsShuttingDown():
+            if HG.client_controller.ProgramIsShuttingDown():
+                
+                screw_it_time = HydrusData.GetNow() + 30
+                
+                while not HG.client_controller.ProgramIsShutDown():
+                    
+                    time.sleep( 0.5 )
+                    
+                    if HydrusData.TimeHasPassed( screw_it_time ):
+                        
+                        return
+                        
+                    
+                
+            else:
                 
                 HG.client_controller.SetDoingFastExit( True )
                 
@@ -148,6 +168,7 @@ class Controller( HydrusController.HydrusController ):
         self._qt_app_running = False
         self._is_booted = False
         self._program_is_shutting_down = False
+        self._program_is_shut_down = False
         self._restore_backup_path = None
         
         self._splash = None
@@ -232,6 +253,11 @@ class Controller( HydrusController.HydrusController ):
         return self.services_manager.GetServices( ( HC.LOCAL_BOORU, HC.CLIENT_API_SERVICE ) )
         
     
+    def _GetWakeDelayPeriod( self ):
+        
+        return self.new_options.GetInteger( 'wake_delay_period' )
+        
+    
     def _PublishShutdownSubtext( self, text ):
         
         self.frame_splash_status.SetSubtext( text )
@@ -260,6 +286,53 @@ class Controller( HydrusController.HydrusController ):
         
         self._doing_fast_exit = True
         
+    
+    def _ShowJustWokeToUser( self ):
+        
+        def do_it( job_key: ClientThreading.JobKey ):
+            
+            while not HG.view_shutdown:
+                
+                with self._sleep_lock:
+                    
+                    if job_key.IsCancelled():
+                        
+                        self._timestamps[ 'now_awake' ] = HydrusData.GetNow()
+                        
+                        job_key.SetVariable( 'popup_text_1', 'enabling I/O now' )
+                        
+                        job_key.Delete()
+                        
+                        return
+                        
+                    
+                    wake_time = self._timestamps[ 'now_awake' ]
+                    
+                
+                if HydrusData.TimeHasPassed( wake_time ):
+                    
+                    job_key.Delete()
+                    
+                    return
+                    
+                else:
+                    
+                    job_key.SetVariable( 'popup_text_1', 'enabling I/O {}'.format( HydrusData.TimestampToPrettyTimeDelta( wake_time ) ) )
+                    
+                
+                time.sleep( 0.5 )
+                
+            
+        
+        job_key = ClientThreading.JobKey( cancellable = True )
+        
+        job_key.SetVariable( 'popup_title', 'just woke up from sleep' )
+        
+        self.pub( 'message', job_key )
+        
+        self.CallToThread( do_it, job_key )
+        
+    
     
     def _ShutdownManagers( self ):
         
@@ -681,7 +754,7 @@ class Controller( HydrusController.HydrusController ):
             
             if self.gui is not None and QP.isValid( self.gui ):
                 
-                self.gui.SaveAndClose()
+                self.gui.SaveAndHide()
                 
             
         except Exception:
@@ -871,11 +944,15 @@ class Controller( HydrusController.HydrusController ):
             
             bandwidth_manager = ClientNetworkingBandwidth.NetworkBandwidthManager()
             
+            tracker_containers = self.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_BANDWIDTH_MANAGER_TRACKER_CONTAINER )
+            
+            bandwidth_manager.SetTrackerContainers( tracker_containers )
+            
             ClientDefaults.SetDefaultBandwidthManagerRules( bandwidth_manager )
             
-            bandwidth_manager._dirty = True
+            bandwidth_manager.SetDirty()
             
-            self.SafeShowCriticalMessage( 'Problem loading object', 'Your bandwidth manager was missing on boot! I have recreated a new empty one with default rules. Please check that your hard drive and client are ok and let the hydrus dev know the details if there is a mystery.' )
+            self.SafeShowCriticalMessage( 'Problem loading object', 'Your bandwidth manager was missing on boot! I have recreated a new one. It may have your bandwidth record, but some/all may be missing. Your rules have been reset to default. Please check that your hard drive and client are ok and let the hydrus dev know the details if there is a mystery.' )
             
         
         session_manager = self.Read( 'serialisable', HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_SESSION_MANAGER )
@@ -884,9 +961,13 @@ class Controller( HydrusController.HydrusController ):
             
             session_manager = ClientNetworkingSessions.NetworkSessionManager()
             
-            session_manager._dirty = True
+            session_containers = self.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_SESSION_MANAGER_SESSION_CONTAINER )
             
-            self.SafeShowCriticalMessage( 'Problem loading object', 'Your session manager was missing on boot! I have recreated a new empty one. Please check that your hard drive and client are ok and let the hydrus dev know the details if there is a mystery.' )
+            session_manager.SetSessionContainers( session_containers )
+            
+            session_manager.SetDirty()
+            
+            self.SafeShowCriticalMessage( 'Problem loading object', 'Your session manager was missing on boot! I have recreated a new one. It may have your sessions, or some/all may be missing. Please check that your hard drive and client are ok and let the hydrus dev know the details if there is a mystery.' )
             
         
         domain_manager = self.Read( 'serialisable', HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
@@ -979,23 +1060,14 @@ class Controller( HydrusController.HydrusController ):
         
         #
         
-        self.frame_splash_status.SetSubtext( 'tag parents' )
-        
         self._managers[ 'undo' ] = ClientManagers.UndoManager( self )
-        
-        def qt_code():
-            
-            self._caches[ 'images' ] = ClientCaches.RenderedImageCache( self )
-            self._caches[ 'thumbnail' ] = ClientCaches.ThumbnailCache( self )
-            
-            self.bitmap_manager = ClientManagers.BitmapManager( self )
-            
-            CC.GlobalPixmaps()
-            
         
         self.frame_splash_status.SetSubtext( 'image caches' )
         
-        self.CallBlockingToQt(self._splash, qt_code)
+        # careful: outside of qt since they don't need qt for init, seems ok _for now_
+        self._caches[ 'images' ] = ClientCaches.RenderedImageCache( self )
+        self._caches[ 'thumbnail' ] = ClientCaches.ThumbnailCache( self )
+        self.bitmap_manager = ClientManagers.BitmapManager( self )
         
         self.sub( self, 'ToClipboard', 'clipboard' )
         
@@ -1106,7 +1178,7 @@ class Controller( HydrusController.HydrusController ):
         job.WakeOnPubSub( 'important_dirt_to_clean' )
         self._daemon_jobs[ 'save_dirty_objects_important' ] = job
         
-        job = self.CallRepeating( 0.0, 600.0, self.SaveDirtyObjectsInfrequent )
+        job = self.CallRepeating( 0.0, 300.0, self.SaveDirtyObjectsInfrequent )
         self._daemon_jobs[ 'save_dirty_objects_infrequent' ] = job
         
         job = self.CallRepeating( 5.0, 3600.0, self.SynchroniseAccounts )
@@ -1190,6 +1262,10 @@ class Controller( HydrusController.HydrusController ):
             
             self.WriteSynchronous( 'maintain_similar_files_search_for_potential_duplicates', search_distance, maintenance_mode = maintenance_mode, stop_time = search_stop_time )
             
+            from hydrus.client import ClientDuplicates
+            
+            ClientDuplicates.DuplicatesManager.instance().RefreshMaintenanceNumbers()
+            
         
         if self.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
             
@@ -1229,21 +1305,6 @@ class Controller( HydrusController.HydrusController ):
             self._timestamps[ 'last_page_change' ] = HydrusData.GetNow()
             
         
-        disk_cache_maintenance_mb = self.new_options.GetNoneableInteger( 'disk_cache_maintenance_mb' )
-        
-        if disk_cache_maintenance_mb is not None and not HG.view_shutdown:
-            
-            cache_period = 3600
-            disk_cache_stop_time = HydrusData.GetNow() + 2
-            
-            if HydrusData.TimeHasPassed( self._timestamps[ 'last_disk_cache_population' ] + cache_period ):
-                
-                self.Read( 'load_into_disk_cache', stop_time = disk_cache_stop_time, caller_limit = disk_cache_maintenance_mb * 1024 * 1024 )
-                
-                self._timestamps[ 'last_disk_cache_population' ] = HydrusData.GetNow()
-                
-            
-        
         def do_gui_refs( gui ):
             
             if self.gui is not None and QP.isValid( self.gui ):
@@ -1274,6 +1335,11 @@ class Controller( HydrusController.HydrusController ):
     def PrepStringForDisplay( self, text ):
         
         return text.lower()
+        
+    
+    def ProgramIsShutDown( self ):
+        
+        return self._program_is_shut_down
         
     
     def ProgramIsShuttingDown( self ):
@@ -1330,7 +1396,7 @@ class Controller( HydrusController.HydrusController ):
         
         services = [ service for service in services if service.GetPort() is not None ]
         
-        self.CallToThread( self.SetRunningTwistedServices, services )
+        self.CallToThreadLongRunning( self.SetRunningTwistedServices, services )
         
     
     def RestoreDatabase( self ):
@@ -1491,7 +1557,7 @@ class Controller( HydrusController.HydrusController ):
                 self.column_list_manager.SetClean()
                 
             
-            if self.network_engine.bandwidth_manager.IsDirty():
+            if self.network_engine.bandwidth_manager.IsDirty() or self.network_engine.bandwidth_manager.HasDirtyTrackerContainers():
                 
                 self.frame_splash_status.SetSubtext( 'bandwidth manager' )
                 
@@ -1500,7 +1566,7 @@ class Controller( HydrusController.HydrusController ):
                 self.network_engine.bandwidth_manager.SetClean()
                 
             
-            if self.network_engine.session_manager.IsDirty():
+            if self.network_engine.session_manager.IsDirty() or self.network_engine.session_manager.HasDirtySessionContainers():
                 
                 self.frame_splash_status.SetSubtext( 'session manager' )
                 
@@ -1569,7 +1635,7 @@ class Controller( HydrusController.HydrusController ):
                             context_factory = twisted.internet.ssl.DefaultOpenSSLContextFactory( ssl_key_path, ssl_cert_path, sslmethod )
                             
                         
-                        from hydrus.client import ClientLocalServer
+                        from hydrus.client.networking import ClientLocalServer
                         
                         if service_type == HC.LOCAL_BOORU:
                             
@@ -1623,7 +1689,11 @@ class Controller( HydrusController.HydrusController ):
                         
                         self._service_keys_to_connected_ports[ service_key ] = ( ipv4_port, ipv6_port )
                         
-                        if not HydrusNetworking.LocalPortInUse( port ):
+                        if HydrusNetworking.LocalPortInUse( port ):
+                            
+                            HydrusData.Print( 'Running "{}" on port {}.'.format( name, port ) )
+                            
+                        else:
                             
                             HydrusData.ShowText( 'Tried to bind port {} for "{}" but it failed.'.format( port, name ) )
                             
@@ -1698,7 +1768,7 @@ class Controller( HydrusController.HydrusController ):
             
             upnp_services = [ service for service in services if service.GetServiceType() in ( HC.LOCAL_BOORU, HC.CLIENT_API_SERVICE ) ]
             
-            self.CallToThread( self.services_upnp_manager.SetServices, upnp_services )
+            self.CallToThreadLongRunning( self.services_upnp_manager.SetServices, upnp_services )
             
             self.WriteSynchronous( 'update_services', services )
             
@@ -1957,6 +2027,8 @@ class Controller( HydrusController.HydrusController ):
             
             self._DestroySplash()
             
+            self._program_is_shut_down = True
+            
             QP.CallAfter( QW.QApplication.quit )
             
         
@@ -2018,7 +2090,7 @@ class Controller( HydrusController.HydrusController ):
                 QP.CallAfter( CopyToClipboard )
                 
             
-            self.CallToThread( THREADWait )
+            self.CallToThreadLongRunning( THREADWait )
             
         
     

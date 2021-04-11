@@ -1250,6 +1250,15 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         self._parents = None
         self._parent_predicates = set()
         
+        if self._predicate_type == PREDICATE_TYPE_PARENT:
+            
+            self._parent_key = HydrusData.GenerateKey()
+            
+        else:
+            
+            self._parent_key = None
+            
+        
         if predicate_type == PREDICATE_TYPE_TAG:
             
             self._matchable_search_texts = { self._value }
@@ -1264,6 +1273,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         
         if isinstance( other, Predicate ):
             
+            if self._predicate_type == PREDICATE_TYPE_PARENT:
+                
+                return False
+                
+            
             return self.__hash__() == other.__hash__()
             
         
@@ -1271,6 +1285,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         
     
     def __hash__( self ):
+        
+        if self._predicate_type == PREDICATE_TYPE_PARENT:
+            
+            return self._parent_key.__hash__()
+            
         
         return ( self._predicate_type, self._value, self._inclusive ).__hash__()
         
@@ -1460,6 +1479,14 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         ( self._min_pending_count, self._max_pending_count) = ClientData.MergeCounts( self._min_pending_count, self._max_pending_count, min_pending_count, max_pending_count )
         
     
+    def ClearCounts( self ):
+        
+        self._min_current_count = 0
+        self._min_pending_count = 0
+        self._max_current_count = None
+        self._max_pending_count = None
+        
+    
     def GetAllCounts( self ):
         
         return ( self._min_current_count, self._max_current_count, self._min_pending_count, self._max_pending_count )
@@ -1527,6 +1554,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             return Predicate( PREDICATE_TYPE_TAG, self._ideal_sibling, self._inclusive )
             
+        
+    
+    def GetIdealSibling( self ):
+        
+        return self._ideal_sibling
         
     
     def GetInclusive( self ):
@@ -1599,7 +1631,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         return self._parent_predicates
         
     
-    def GetTextsAndNamespaces( self, or_under_construction = False ):
+    def GetTextsAndNamespaces( self, render_for_user: bool, or_under_construction: bool = False ):
         
         if self._predicate_type == PREDICATE_TYPE_OR_CONTAINER:
             
@@ -1621,7 +1653,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         else:
             
-            texts_and_namespaces = [ ( self.ToString(), self.GetNamespace() ) ]
+            texts_and_namespaces = [ ( self.ToString( render_for_user = render_for_user ), self.GetNamespace() ) ]
             
         
         return texts_and_namespaces
@@ -1652,6 +1684,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
     def HasNonZeroCount( self ):
         
         return self._min_current_count > 0 or self._min_pending_count > 0
+        
+    
+    def HasIdealSibling( self ):
+        
+        return self._ideal_sibling is not None
         
     
     def HasParentPredicates( self ):
@@ -2376,14 +2413,6 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             base += count_text
             
-            if tag_display_type == ClientTags.TAG_DISPLAY_STORAGE:
-                
-                if self._ideal_sibling is not None and self._ideal_sibling != tag:
-                    
-                    base += ' (will display as ' + self._ideal_sibling + ')'
-                    
-                
-            
         elif self._predicate_type == PREDICATE_TYPE_PARENT:
             
             base = '    '
@@ -2463,7 +2492,7 @@ def FilterPredicatesBySearchText( service_key, search_text, predicates: typing.C
         
         regular_parts_of_s = s.split( '*' )
         
-        escaped_parts_of_s = list(map( re.escape, regular_parts_of_s ))
+        escaped_parts_of_s = [ re.escape( rpos ) for rpos in regular_parts_of_s ]
         
         s = '.*'.join( escaped_parts_of_s )
         
@@ -2481,7 +2510,9 @@ def FilterPredicatesBySearchText( service_key, search_text, predicates: typing.C
             
             beginning = r'\A'
             
-            s = s.replace( r':', r'(:|.*\s)', 1 )
+            ( namespace, subtag ) = s.split( ':', 1 )
+            
+            s = r'{}:(.*\s)?{}'.format( namespace, subtag )
             
         elif s.startswith( '.*' ):
             
@@ -2787,7 +2818,7 @@ class PredicateResultsCache( object ):
         self._predicates = list( predicates )
         
     
-    def CanServeTagResults( self, strict_search_text: str, exact_match: bool ):
+    def CanServeTagResults( self, parsed_autocomplete_text: ParsedAutocompleteText, exact_match: bool ):
         
         return False
         
@@ -2831,7 +2862,9 @@ class PredicateResultsCacheTag( PredicateResultsCache ):
         self._exact_match = exact_match
         
     
-    def CanServeTagResults( self, strict_search_text: str, exact_match: bool ):
+    def CanServeTagResults( self, parsed_autocomplete_text: ParsedAutocompleteText, exact_match: bool ):
+        
+        strict_search_text = parsed_autocomplete_text.GetSearchText( False )
         
         if self._exact_match:
             
@@ -2846,18 +2879,57 @@ class PredicateResultsCacheTag( PredicateResultsCache ):
             
         else:
             
-            # a cache for 'cha' is invalid for 'character:sam'
+            tag_autocomplete_options = parsed_autocomplete_text.GetTagAutocompleteOptions()
             
             ( strict_search_text_namespace, strict_search_text_subtag ) = HydrusTags.SplitTag( strict_search_text )
             
-            if strict_search_text_namespace == self._strict_search_text_namespace:
+            #
+            
+            if SearchTextIsFetchAll( self._strict_search_text ):
                 
-                return strict_search_text_subtag.startswith( self._strict_search_text_subtag )
+                # if '*' searches are ok, we should have all results
+                return tag_autocomplete_options.FetchAllAllowed()
                 
-            else:
+            
+            #
+            
+            subtag_to_namespace_search = self._strict_search_text_namespace == '' and self._strict_search_text_subtag != '' and strict_search_text_namespace != ''
+            
+            if subtag_to_namespace_search:
+                
+                # if a user searches 'char*' and then later 'character:samus*', we may have the results
+                # namespace changed, so if we do not satisfy this slim case, we can't provide any results
+                we_searched_namespace_as_subtag = strict_search_text_namespace.startswith( self._strict_search_text_subtag )
+                
+                return we_searched_namespace_as_subtag and tag_autocomplete_options.SearchNamespacesIntoFullTags()
+                
+            
+            #
+            
+            if self._strict_search_text_namespace != strict_search_text_namespace:
                 
                 return False
                 
+            
+            #
+            
+            # if user searched 'character:' or 'character:*', we may have the results
+            # if we do, we have all possible results
+            if SearchTextIsNamespaceBareFetchAll( self._strict_search_text ):
+                
+                return tag_autocomplete_options.NamespaceBareFetchAllAllowed()
+                
+            
+            if SearchTextIsNamespaceFetchAll( self._strict_search_text ):
+                
+                return tag_autocomplete_options.NamespaceFetchAllAllowed()
+                
+            
+            #
+            
+            # 'sam' will match 'samus', character:sam will match character:samus
+            
+            return strict_search_text_subtag.startswith( self._strict_search_text_subtag )
             
         
     

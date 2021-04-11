@@ -13,18 +13,18 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusThreading
+from hydrus.core.networking import HydrusNetwork
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientDefaults
+from hydrus.client import ClientDuplicates
 from hydrus.client import ClientParsing
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSearch
 from hydrus.client import ClientThreading
 from hydrus.client.gui import ClientGUICanvas
 from hydrus.client.gui import ClientGUICanvasFrame
-from hydrus.client.gui import ClientGUICommon
-from hydrus.client.gui import ClientGUIControls
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
@@ -43,8 +43,14 @@ from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.networking import ClientGUIHydrusNetwork
+from hydrus.client.gui.networking import ClientGUINetworkJobControl
 from hydrus.client.gui.search import ClientGUIACDropdown
 from hydrus.client.gui.search import ClientGUISearch
+from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.gui.widgets import ClientGUIControls
+from hydrus.client.gui.widgets import ClientGUIMenuButton
+from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportGallery
 from hydrus.client.importing import ClientImportLocal
 from hydrus.client.importing import ClientImportOptions
@@ -665,7 +671,7 @@ HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIAL
 
 class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
     
-    def __init__( self, parent, management_controller: ManagementController, page_key, tag_display_type, tag_autocomplete: typing.Optional[ ClientGUIACDropdown.AutoCompleteDropdownTagsRead ] = None ):
+    def __init__( self, parent, management_controller: ManagementController, page_key, tag_display_type = ClientTags.TAG_DISPLAY_SELECTION_LIST, tag_autocomplete: typing.Optional[ ClientGUIACDropdown.AutoCompleteDropdownTagsRead ] = None ):
         
         ClientGUIListBoxes.ListBoxTagsMedia.__init__( self, parent, tag_display_type, include_counts = True )
         
@@ -678,7 +684,7 @@ class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
     
     def _Activate( self, shift_down ) -> bool:
         
-        predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, term ) for term in self._selected_terms ]
+        predicates = self._GetPredicatesFromTerms( self._selected_terms )
         
         if len( predicates ) > 0:
             
@@ -764,7 +770,6 @@ def managementScrollbarValueChanged( value ):
 class ManagementPanel( QW.QScrollArea ):
     
     SHOW_COLLECT = True
-    TAG_DISPLAY_TYPE = ClientTags.TAG_DISPLAY_SELECTION_LIST
     
     def __init__( self, parent, page, controller, management_controller ):
         
@@ -838,7 +843,7 @@ class ManagementPanel( QW.QScrollArea ):
         
         tags_box = ClientGUIListBoxes.StaticBoxSorterForListBoxTags( self, 'selection tags' )
         
-        self._current_selection_tags_list = ListBoxTagsMediaManagementPanel( tags_box, self._management_controller, self._page_key, self.TAG_DISPLAY_TYPE )
+        self._current_selection_tags_list = ListBoxTagsMediaManagementPanel( tags_box, self._management_controller, self._page_key )
         
         tags_box.SetTagsBox( self._current_selection_tags_list )
         
@@ -901,11 +906,6 @@ class ManagementPanel( QW.QScrollArea ):
         pass
         
     
-    def PausePlaySearch( self ):
-        
-        pass
-        
-    
     def REPEATINGPageUpdate( self ):
         
         pass
@@ -921,22 +921,6 @@ def CreateManagementPanel( parent, page, controller, management_controller ) -> 
     
     return management_panel
     
-def WaitOnDupeFilterJob( job_key ):
-    
-    while not job_key.IsDone():
-        
-        if HydrusThreading.IsThreadShuttingDown():
-            
-            return
-            
-        
-        time.sleep( 0.25 )
-        
-    
-    time.sleep( 0.5 )
-    
-    HG.client_controller.pub( 'refresh_dupe_page_numbers' )
-    
 class ManagementPanelDuplicateFilter( ManagementPanel ):
     
     SHOW_COLLECT = False
@@ -945,21 +929,20 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         ManagementPanel.__init__( self, parent, page, controller, management_controller )
         
-        self._job = None
-        self._job_key = None
-        self._in_break = False
+        self._duplicates_manager = ClientDuplicates.DuplicatesManager.instance()
         
         self._similar_files_maintenance_status = None
+        self._duplicates_manager_is_fetching_maintenance_numbers = False
+        self._potential_file_search_currently_happening = False
+        self._maintenance_numbers_need_redrawing = True
+        
+        self._have_done_first_maintenance_numbers_show = False
         
         new_options = self._controller.new_options
         
-        self._maintenance_numbers_dirty = True
         self._dupe_count_numbers_dirty = True
         
-        self._currently_refreshing_maintenance_numbers = False
         self._currently_refreshing_dupe_count_numbers = False
-        
-        self._have_done_first_fetch = False
         
         #
         
@@ -971,7 +954,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         #
         
         self._refresh_maintenance_status = ClientGUICommon.BetterStaticText( self._main_left_panel, ellipsize_end = True )
-        self._refresh_maintenance_button = ClientGUICommon.BetterBitmapButton( self._main_left_panel, CC.global_pixmaps().refresh, self.RefreshMaintenanceNumbers )
+        self._refresh_maintenance_button = ClientGUICommon.BetterBitmapButton( self._main_left_panel, CC.global_pixmaps().refresh, self._duplicates_manager.RefreshMaintenanceNumbers )
         
         menu_items = []
         
@@ -982,7 +965,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         menu_items.append( ( 'check', 'search for duplicate pairs at the current distance during normal db maintenance', 'Tell the client to find duplicate pairs in its normal db maintenance cycles, whether you have that set to idle or shutdown time.', check_manager ) )
         
-        self._cog_button = ClientGUICommon.MenuBitmapButton( self._main_left_panel, CC.global_pixmaps().cog, menu_items )
+        self._cog_button = ClientGUIMenuButton.MenuBitmapButton( self._main_left_panel, CC.global_pixmaps().cog, menu_items )
         
         menu_items = []
         
@@ -990,7 +973,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         menu_items.append( ( 'normal', 'open the html duplicates help', 'Open the help page for duplicates processing in your web browser.', page_func ) )
         
-        self._help_button = ClientGUICommon.MenuBitmapButton( self._main_left_panel, CC.global_pixmaps().help, menu_items )
+        self._help_button = ClientGUIMenuButton.MenuBitmapButton( self._main_left_panel, CC.global_pixmaps().help, menu_items )
         
         #
         
@@ -1005,14 +988,13 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         menu_items.append( ( 'normal', 'similar', 'Search for similar files.', HydrusData.Call( self._SetSearchDistance, HC.HAMMING_SIMILAR ) ) )
         menu_items.append( ( 'normal', 'speculative', 'Search for files that are probably similar.', HydrusData.Call( self._SetSearchDistance, HC.HAMMING_SPECULATIVE ) ) )
         
-        self._search_distance_button = ClientGUICommon.MenuButton( self._searching_panel, 'similarity', menu_items )
+        self._search_distance_button = ClientGUIMenuButton.MenuButton( self._searching_panel, 'similarity', menu_items )
         
         self._search_distance_spinctrl = QP.MakeQSpinBox( self._searching_panel, min=0, max=64, width = 50 )
-        self._search_distance_spinctrl.valueChanged.connect( self.EventSearchDistanceChanged )
         
         self._num_searched = ClientGUICommon.TextAndGauge( self._searching_panel )
         
-        self._search_button = ClientGUICommon.BetterBitmapButton( self._searching_panel, CC.global_pixmaps().play, self._SearchForDuplicates )
+        self._search_button = ClientGUICommon.BetterBitmapButton( self._searching_panel, CC.global_pixmaps().play, self._duplicates_manager.StartPotentialsSearch )
         
         #
         
@@ -1026,7 +1008,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
             menu_items.append( ( 'normal', 'edit duplicate metadata merge options for \'alternates\' (advanced!)', 'edit what content is merged when you filter files', HydrusData.Call( self._EditMergeOptions, HC.DUPLICATE_ALTERNATE ) ) )
             
         
-        self._edit_merge_options = ClientGUICommon.MenuButton( self._main_right_panel, 'edit default duplicate metadata merge options', menu_items )
+        self._edit_merge_options = ClientGUIMenuButton.MenuButton( self._main_right_panel, 'edit default duplicate metadata merge options', menu_items )
         
         #
         
@@ -1149,9 +1131,11 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         self.widget().setLayout( vbox )
         
-        self._controller.sub( self, 'RefreshAllNumbers', 'refresh_dupe_page_numbers' )
+        self._controller.sub( self, 'NotifyNewMaintenanceNumbers', 'new_similar_files_maintenance_numbers' )
+        self._controller.sub( self, 'NotifyNewPotentialsSearchNumbers', 'new_similar_files_potentials_search_numbers' )
         
         self._tag_autocomplete.searchChanged.connect( self.SearchChanged )
+        self._search_distance_spinctrl.valueChanged.connect( self.EventSearchDistanceChanged )
         
     
     def _EditMergeOptions( self, duplicate_type ):
@@ -1234,47 +1218,6 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
             
         
     
-    def _RefreshMaintenanceNumbers( self ):
-        
-        def qt_code( similar_files_maintenance_status ):
-            
-            if not self or not QP.isValid( self ):
-                
-                return
-                
-            
-            self._currently_refreshing_maintenance_numbers = False
-            
-            self._maintenance_numbers_dirty = False
-            
-            self._refresh_maintenance_status.setText( '' )
-            
-            self._refresh_maintenance_button.setEnabled( True )
-            
-            self._similar_files_maintenance_status = similar_files_maintenance_status
-            
-            self._UpdateMaintenanceStatus()
-            
-        
-        def thread_do_it():
-            
-            similar_files_maintenance_status = HG.client_controller.Read( 'similar_files_maintenance_status' )
-            
-            QP.CallAfter( qt_code, similar_files_maintenance_status )
-            
-        
-        if not self._currently_refreshing_maintenance_numbers:
-            
-            self._currently_refreshing_maintenance_numbers = True
-            
-            self._refresh_maintenance_status.setText( 'updating\u2026' )
-            
-            self._refresh_maintenance_button.setEnabled( False )
-            
-            HG.client_controller.CallToThread( thread_do_it )
-            
-        
-    
     def _ResetUnknown( self ):
         
         text = 'This will delete all the potential duplicate pairs and reset their files\' search status.'
@@ -1287,7 +1230,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
             
             self._controller.Write( 'delete_potential_duplicate_pairs' )
             
-            self._maintenance_numbers_dirty = True
+            self._duplicates_manager.RefreshMaintenanceNumbers()
             
         
     
@@ -1305,21 +1248,6 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
             
             self._dupe_count_numbers_dirty = True
             
-        
-    
-    def _SearchForDuplicates( self ):
-        
-        job_key = ClientThreading.JobKey( cancellable = True )
-        
-        job_key.SetVariable( 'popup_title', 'initialising' )
-        
-        search_distance = self._search_distance_spinctrl.value()
-        
-        self._controller.Write( 'maintain_similar_files_search_for_potential_duplicates', search_distance, maintenance_mode = HC.MAINTENANCE_FORCED, job_key = job_key )
-        
-        self._controller.pub( 'modal_message', job_key )
-        
-        self._controller.CallLater( 1.0, WaitOnDupeFilterJob, job_key )
         
     
     def _SetCurrentMediaAs( self, duplicate_type ):
@@ -1369,9 +1297,11 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
     
     def _UpdateMaintenanceStatus( self ):
         
-        work_can_be_done = False
+        self._refresh_maintenance_button.setEnabled( not ( self._duplicates_manager_is_fetching_maintenance_numbers or self._potential_file_search_currently_happening ) )
         
         if self._similar_files_maintenance_status is None:
+            
+            self._search_button.setEnabled( False )
             
             return
             
@@ -1387,11 +1317,14 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         self._search_distance_button.setEnabled( True )
         self._search_distance_spinctrl.setEnabled( True )
         
+        options_search_distance = self._controller.new_options.GetInteger( 'similar_files_duplicate_pairs_search_distance' )
+        
+        if self._search_distance_spinctrl.value() != options_search_distance:
+            
+            self._search_distance_spinctrl.setValue( options_search_distance )
+            
+        
         search_distance = self._search_distance_spinctrl.value()
-        
-        new_options = self._controller.new_options
-        
-        new_options.SetInteger( 'similar_files_duplicate_pairs_search_distance', search_distance )
         
         if search_distance in HC.hamming_string_lookup:
             
@@ -1406,13 +1339,13 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         num_searched = sum( ( count for ( value, count ) in searched_distances_to_count.items() if value is not None and value >= search_distance ) )
         
-        if num_searched == total_num_files:
-            
-            self._num_searched.SetValue( 'All potential duplicates found at this distance.', total_num_files, total_num_files )
-            
-            self._search_button.setEnabled( False )
-            
-        else:
+        not_all_files_searched = num_searched < total_num_files
+        
+        we_can_start_work = not_all_files_searched and not self._potential_file_search_currently_happening
+        
+        self._search_button.setEnabled( we_can_start_work )
+        
+        if not_all_files_searched:
             
             if num_searched == 0:
                 
@@ -1423,28 +1356,23 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
                 self._num_searched.SetValue( 'Searched ' + HydrusData.ConvertValueRangeToPrettyString( num_searched, total_num_files ) + ' files at this distance.', num_searched, total_num_files )
                 
             
-            self._search_button.setEnabled( True )
-            
-            work_can_be_done = True
-            
-        
-        if work_can_be_done:
-            
             page_name = 'preparation (needs work)'
             
-            if not self._have_done_first_fetch:
+            if not self._have_done_first_maintenance_numbers_show:
                 
                 self._main_notebook.SelectPage( self._main_left_panel )
                 
             
         else:
             
+            self._num_searched.SetValue( 'All potential duplicates found at this distance.', total_num_files, total_num_files )
+            
             page_name = 'preparation'
             
         
         self._main_notebook.setTabText( 0, page_name )
         
-        self._have_done_first_fetch = True
+        self._have_done_first_maintenance_numbers_show = True
         
     
     def _UpdateBothFilesMatchButton( self ):
@@ -1484,7 +1412,23 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
     
     def EventSearchDistanceChanged( self ):
         
+        search_distance = self._search_distance_spinctrl.value()
+        
+        self._controller.new_options.SetInteger( 'similar_files_duplicate_pairs_search_distance', search_distance )
+        
+        self._controller.pub( 'new_similar_files_maintenance_numbers' )
+        
         self._UpdateMaintenanceStatus()
+        
+    
+    def NotifyNewMaintenanceNumbers( self ):
+        
+        self._maintenance_numbers_need_redrawing = True
+        
+    
+    def NotifyNewPotentialsSearchNumbers( self ):
+        
+        self._dupe_count_numbers_dirty = True
         
     
     def PageHidden( self ):
@@ -1501,21 +1445,9 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         self._tag_autocomplete.SetForceDropdownHide( False )
         
     
-    def RefreshAllNumbers( self ):
-        
-        self.RefreshDuplicateNumbers()
-        
-        self.RefreshMaintenanceNumbers()
-        
-    
     def RefreshDuplicateNumbers( self ):
         
         self._dupe_count_numbers_dirty = True
-        
-    
-    def RefreshMaintenanceNumbers( self ):
-        
-        self._maintenance_numbers_dirty = True
         
     
     def RefreshQuery( self ):
@@ -1525,9 +1457,13 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
     
     def REPEATINGPageUpdate( self ):
         
-        if self._maintenance_numbers_dirty:
+        if self._maintenance_numbers_need_redrawing:
             
-            self._RefreshMaintenanceNumbers()
+            ( self._similar_files_maintenance_status, self._duplicates_manager_is_fetching_maintenance_numbers, self._potential_file_search_currently_happening ) = self._duplicates_manager.GetMaintenanceNumbers()
+            
+            self._maintenance_numbers_need_redrawing = False
+            
+            self._UpdateMaintenanceStatus()
             
         
         if self._dupe_count_numbers_dirty:
@@ -1882,15 +1818,26 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         pretty_source = source
         
+        files_finished = gallery_import.FilesFinished()
         files_paused = gallery_import.FilesPaused()
         
-        if files_paused:
+        if files_finished:
+            
+            pretty_files_paused = HG.client_controller.new_options.GetString( 'stop_character' )
+            
+            sort_files_paused = -1
+            
+        elif files_paused:
             
             pretty_files_paused = HG.client_controller.new_options.GetString( 'pause_character' )
+            
+            sort_files_paused = 0
             
         else:
             
             pretty_files_paused = ''
+            
+            sort_files_paused = 1
             
         
         gallery_finished = gallery_import.GalleryFinished()
@@ -1915,9 +1862,9 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
             sort_gallery_paused = 1
             
         
-        status = gallery_import.GetSimpleStatus()
+        ( status_enum, pretty_status ) = gallery_import.GetSimpleStatus()
         
-        pretty_status = status
+        sort_status = ClientImporting.downloader_enum_sort_lookup[ status_enum ]
         
         file_seed_cache_status = gallery_import.GetFileSeedCache().GetStatus()
         
@@ -1932,7 +1879,7 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         pretty_added = ClientData.TimestampToPrettyTimeDelta( added, show_seconds = False )
         
         display_tuple = ( pretty_query_text, pretty_source, pretty_files_paused, pretty_gallery_paused, pretty_status, pretty_progress, pretty_added )
-        sort_tuple = ( query_text, pretty_source, files_paused, sort_gallery_paused, status, progress, added )
+        sort_tuple = ( query_text, pretty_source, sort_files_paused, sort_gallery_paused, sort_status, progress, added )
         
         return ( display_tuple, sort_tuple )
         
@@ -2722,17 +2669,12 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         pretty_added = ClientData.TimestampToPrettyTimeDelta( added, show_seconds = False )
         
-        watcher_status = self._multiple_watcher_import.GetWatcherSimpleStatus( watcher )
+        ( status_enum, pretty_watcher_status ) = self._multiple_watcher_import.GetWatcherSimpleStatus( watcher )
         
-        pretty_watcher_status = watcher_status
-        
-        if watcher_status == '':
-            
-            watcher_status = 'zzz' # to sort _after_ DEAD and other interesting statuses on ascending sort
-            
+        sort_watcher_status = ClientImporting.downloader_enum_sort_lookup[ status_enum ]
         
         display_tuple = ( pretty_subject, pretty_files_paused, pretty_checking_paused, pretty_watcher_status, pretty_progress, pretty_added )
-        sort_tuple = ( subject, files_paused, sort_checking_paused, watcher_status, progress, added )
+        sort_tuple = ( subject, files_paused, sort_checking_paused, sort_watcher_status, progress, added )
         
         return ( display_tuple, sort_tuple )
         
@@ -3287,7 +3229,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         self._current_action = ClientGUICommon.BetterStaticText( self._import_queue_panel, ellipsize_end = True )
         self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self._import_queue_panel, self._controller, self._page_key )
-        self._file_download_control = ClientGUIControls.NetworkJobControl( self._import_queue_panel )
+        self._file_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._import_queue_panel )
         
         #
         
@@ -3302,7 +3244,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._simple_parsing_jobs_panel, self._controller, True, False, self._page_key )
         
-        self._page_download_control = ClientGUIControls.NetworkJobControl( self._simple_parsing_jobs_panel )
+        self._page_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._simple_parsing_jobs_panel )
         
         self._pending_jobs_listbox = ClientGUIListBoxes.BetterQListWidget( self._simple_parsing_jobs_panel )
         
@@ -3331,7 +3273,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         menu_items.append( ( 'normal', 'edit formulae', 'Edit these parsing formulae.', self._EditFormulae ) )
         
-        self._formula_cog = ClientGUICommon.MenuBitmapButton( self._simple_parsing_jobs_panel, CC.global_pixmaps().cog, menu_items )
+        self._formula_cog = ClientGUIMenuButton.MenuBitmapButton( self._simple_parsing_jobs_panel, CC.global_pixmaps().cog, menu_items )
         
         self._RefreshFormulae()
         
@@ -3734,13 +3676,13 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         self._pause_button = ClientGUICommon.BetterBitmapButton( self._url_panel, CC.global_pixmaps().file_pause, self.Pause )
         self._pause_button.setToolTip( 'pause/play files' )
         
-        self._file_download_control = ClientGUIControls.NetworkJobControl( self._url_panel )
+        self._file_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._url_panel )
         
         self._urls_import = self._management_controller.GetVariable( 'urls_import' )
         
         self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self._url_panel, self._controller, page_key = self._page_key )
         
-        self._gallery_download_control = ClientGUIControls.NetworkJobControl( self._url_panel )
+        self._gallery_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._url_panel )
         
         self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._url_panel, self._controller, False, False, page_key = self._page_key )
         
@@ -3883,7 +3825,7 @@ class ManagementPanelPetitions( ManagementPanel ):
         ManagementPanel.__init__( self, parent, page, controller, management_controller )
         
         self._service = self._controller.services_manager.GetService( self._petition_service_key )
-        self._can_ban = self._service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_OVERRULE )
+        self._can_ban = self._service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE )
         
         service_type = self._service.GetServiceType()
         
@@ -3971,7 +3913,8 @@ class ManagementPanelPetitions( ManagementPanel ):
         self._process = QW.QPushButton( 'process', self._petition_panel )
         self._process.clicked.connect( self.EventProcess )
         self._process.setObjectName( 'HydrusAccept' )
-        self._process.setEnabled( False )
+        
+        self._copy_account_key_button = ClientGUICommon.BetterButton( self._petition_panel, 'copy petitioner account key', self._CopyAccountKey )
         
         self._modify_petitioner = QW.QPushButton( 'modify petitioner', self._petition_panel )
         self._modify_petitioner.clicked.connect( self.EventModifyPetitioner )
@@ -4006,6 +3949,7 @@ class ManagementPanelPetitions( ManagementPanel ):
         self._petition_panel.Add( sort_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._petition_panel.Add( self._contents, CC.FLAGS_EXPAND_BOTH_WAYS )
         self._petition_panel.Add( self._process, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._petition_panel.Add( self._copy_account_key_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._modify_petitioner, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         vbox = QP.VBoxLayout()
@@ -4021,6 +3965,8 @@ class ManagementPanelPetitions( ManagementPanel ):
         self.widget().setLayout( vbox )
         
         self._contents.rightClicked.connect( self.EventRowRightClick )
+        
+        self._DrawCurrentPetition()
         
     
     def _CheckAll( self ):
@@ -4039,18 +3985,31 @@ class ManagementPanelPetitions( ManagementPanel ):
             
         
     
+    def _CopyAccountKey( self ):
+        
+        if self._current_petition is None:
+            
+            return
+            
+        
+        account_key = self._current_petition.GetPetitionerAccount().GetAccountKey()
+        
+        HG.client_controller.pub( 'clipboard', 'text', account_key.hex() )
+        
+    
     def _DrawCurrentPetition( self ):
         
         if self._current_petition is None:
             
-            self._action_text.setText( '' )
+            self._action_text.clear()
             self._action_text.setProperty( 'hydrus_text', 'default' )
             
-            self._reason_text.setPlainText( '' )
+            self._reason_text.clear()
             self._reason_text.setProperty( 'hydrus_text', 'default' )
             
             self._contents.clear()
             self._process.setEnabled( False )
+            self._copy_account_key_button.setEnabled( False )
             
             self._sort_by_left.setEnabled( False )
             self._sort_by_right.setEnabled( False )
@@ -4099,6 +4058,7 @@ class ManagementPanelPetitions( ManagementPanel ):
             self._SetContentsAndChecks( contents_and_checks, 'right' )
             
             self._process.setEnabled( True )
+            self._copy_account_key_button.setEnabled( True )
             
             if self._can_ban:
                 
@@ -4108,8 +4068,6 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         self._action_text.style().polish( self._action_text )
         self._reason_text.style().polish( self._reason_text )
-        
-        self._ShowHashes( [] )
         
     
     def _DrawNumPetitions( self ):
@@ -4237,6 +4195,8 @@ class ManagementPanelPetitions( ManagementPanel ):
             
             self._DrawCurrentPetition()
             
+            self._ShowHashes( [ ])
+            
         
         def qt_done():
             
@@ -4268,6 +4228,8 @@ class ManagementPanelPetitions( ManagementPanel ):
             self._current_petition = None
             
             self._DrawCurrentPetition()
+            
+            self._ShowHashes( [] )
             
         
         button.setEnabled( False )
@@ -4557,17 +4519,20 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         self._DrawCurrentPetition()
         
+        self._ShowHashes( [] )
+        
     
     def EventModifyPetitioner( self ):
         
-        QW.QMessageBox.warning( self, 'Warning', 'modify users does not work yet!' )
+        subject_account_key = self._current_petition.GetPetitionerAccount().GetAccountKey()
         
-        return
+        subject_account_identifiers = [ HydrusNetwork.AccountIdentifier( account_key = subject_account_key ) ]
         
-        with ClientGUIDialogs.DialogModifyAccounts( self, self._petition_service_key, ( self._current_petition.GetPetitionerAccount(), ) ) as dlg:
-            
-            dlg.exec()
-            
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'manage accounts' )
+        
+        panel = ClientGUIHydrusNetwork.ModifyAccountsPanel( frame, self._petition_service_key, subject_account_identifiers )
+        
+        frame.SetPanel( panel )
         
     
     def EventRowRightClick( self ):
@@ -4729,7 +4694,7 @@ class ManagementPanelQuery( ManagementPanel ):
         
         if self._search_enabled:
             
-            self._current_selection_tags_list = ListBoxTagsMediaManagementPanel( tags_box, self._management_controller, self._page_key, self.TAG_DISPLAY_TYPE, tag_autocomplete = self._tag_autocomplete )
+            self._current_selection_tags_list = ListBoxTagsMediaManagementPanel( tags_box, self._management_controller, self._page_key, tag_autocomplete = self._tag_autocomplete )
             
             file_search_context = self._management_controller.GetVariable( 'file_search_context' )
             
@@ -4743,7 +4708,7 @@ class ManagementPanelQuery( ManagementPanel ):
             
         else:
             
-            self._current_selection_tags_list = ListBoxTagsMediaManagementPanel( tags_box, self._management_controller, self._page_key, self.TAG_DISPLAY_TYPE )
+            self._current_selection_tags_list = ListBoxTagsMediaManagementPanel( tags_box, self._management_controller, self._page_key )
             
         
         tags_box.SetTagsBox( self._current_selection_tags_list )
@@ -4948,14 +4913,6 @@ class ManagementPanelQuery( ManagementPanel ):
         if len( initial_predicates ) > 0 and not file_search_context.IsComplete():
             
             QP.CallAfter( self.RefreshQuery )
-            
-        
-    
-    def PausePlaySearch( self ):
-        
-        if self._search_enabled:
-            
-            self._tag_autocomplete.PausePlaySearch()
             
         
     

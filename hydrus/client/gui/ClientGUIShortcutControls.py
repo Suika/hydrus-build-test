@@ -13,7 +13,6 @@ from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client.gui import ClientGUIApplicationCommand
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIShortcuts
@@ -21,6 +20,7 @@ from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.widgets import ClientGUICommon
 
 def ManageShortcuts( win: QW.QWidget ):
     
@@ -213,7 +213,6 @@ class EditShortcutSetPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 self._shortcuts.AddDatas( ( data, ) )
                 
-                
             
         
     
@@ -259,6 +258,25 @@ class EditShortcutSetPanel( ClientGUIScrolledPanels.EditPanel ):
         shortcut_set = ClientGUIShortcuts.ShortcutSet( name )
         
         for ( shortcut, command ) in self._shortcuts.GetData():
+            
+            dupe_command = shortcut_set.GetCommand( shortcut )
+            
+            if dupe_command is not None:
+                
+                message = 'The shortcut:'
+                message += os.linesep * 2
+                message += shortcut.ToString()
+                message += os.linesep * 2
+                message += 'is mapped twice:'
+                message += os.linesep * 2
+                message += command.ToString()
+                message += os.linesep * 2
+                message += dupe_command.ToString()
+                message += os.linesep * 2
+                message += 'The system only supports one command per shortcut in a set for now, please remove one.'
+                
+                raise HydrusExceptions.VetoException( message )
+                
             
             shortcut_set.SetCommand( shortcut, command )
             
@@ -455,7 +473,7 @@ class EditShortcutsPanel( ClientGUIScrolledPanels.EditPanel ):
         if name in ClientGUIShortcuts.shortcut_names_to_descriptions:
             
             pretty_name = ClientGUIShortcuts.shortcut_names_to_pretty_names[ name ]
-            sort_name = ClientGUIShortcuts.shortcut_names_to_sort_order[ name ]
+            sort_name = ClientGUIShortcuts.shortcut_names_sorted.index( name )
             
         else:
             

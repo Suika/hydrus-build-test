@@ -13,11 +13,11 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusText
 
+from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientSearch
 from hydrus.client import ClientThreading
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
@@ -27,7 +27,9 @@ from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
+from hydrus.client.gui.lists import ClientGUIListBoxesData
 from hydrus.client.gui.search import ClientGUISearch
+from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.metadata import ClientTags
 
 from hydrus.external import LogicExpressionQueryParser
@@ -198,13 +200,13 @@ def ReadFetch(
             
             is_explicit_wildcard = parsed_autocomplete_text.IsExplicitWildcard()
             
-            small_exact_match_search = ShouldDoExactSearch( strict_search_text ) and not is_explicit_wildcard
+            small_exact_match_search = ShouldDoExactSearch( parsed_autocomplete_text )
             
             matches = []
             
             if small_exact_match_search:
                 
-                if not results_cache.CanServeTagResults( strict_search_text, True ):
+                if not results_cache.CanServeTagResults( parsed_autocomplete_text, True ):
                     
                     predicates = HG.client_controller.Read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_ACTUAL, tag_search_context, file_service_key, search_text = strict_search_text, exact_match = True, inclusive = parsed_autocomplete_text.inclusive, add_namespaceless = add_namespaceless, job_key = job_key )
                     
@@ -221,7 +223,7 @@ def ReadFetch(
                     
                 else:
                     
-                    cache_valid = results_cache.CanServeTagResults( autocomplete_search_text, False )
+                    cache_valid = results_cache.CanServeTagResults( parsed_autocomplete_text, False )
                     
                 
                 if cache_valid:
@@ -385,32 +387,39 @@ def PutAtTopOfMatches( matches: list, predicate: ClientSearch.Predicate, insert_
             
         
     
-def ShouldDoExactSearch( entry_text ):
+def ShouldDoExactSearch( parsed_autocomplete_text: ClientSearch.ParsedAutocompleteText ):
     
-    if entry_text is None:
+    if parsed_autocomplete_text.IsExplicitWildcard():
         
         return False
         
     
-    autocomplete_exact_match_threshold = HG.client_controller.new_options.GetNoneableInteger( 'autocomplete_exact_match_threshold' )
+    strict_search_text = parsed_autocomplete_text.GetSearchText( False )
     
-    if autocomplete_exact_match_threshold is None:
+    exact_match_character_threshold = parsed_autocomplete_text.GetTagAutocompleteOptions().GetExactMatchCharacterThreshold()
+    
+    if exact_match_character_threshold is None:
         
         return False
         
     
-    if ':' in entry_text:
+    if ':' in strict_search_text:
         
-        ( namespace, test_text ) = HydrusTags.SplitTag( entry_text )
+        ( namespace, test_text ) = HydrusTags.SplitTag( strict_search_text )
         
     else:
         
-        test_text = entry_text
+        test_text = strict_search_text
         
     
-    return 0 < len( test_text ) <= autocomplete_exact_match_threshold
+    if len( test_text ) == 0:
+        
+        return False
+        
     
-def WriteFetch( win, job_key, results_callable, parsed_autocomplete_text: ClientSearch.ParsedAutocompleteText, tag_search_context: ClientSearch.TagSearchContext, file_service_key: bytes, expand_parents: bool, results_cache: ClientSearch.PredicateResultsCache ):
+    return len( test_text ) <= exact_match_character_threshold
+    
+def WriteFetch( win, job_key, results_callable, parsed_autocomplete_text: ClientSearch.ParsedAutocompleteText, tag_search_context: ClientSearch.TagSearchContext, file_service_key: bytes, results_cache: ClientSearch.PredicateResultsCache ):
     
     display_tag_service_key = tag_search_context.display_service_key
     
@@ -425,11 +434,11 @@ def WriteFetch( win, job_key, results_callable, parsed_autocomplete_text: Client
         strict_search_text = parsed_autocomplete_text.GetSearchText( False )
         autocomplete_search_text = parsed_autocomplete_text.GetSearchText( True )
         
-        small_exact_match_search = ShouldDoExactSearch( strict_search_text ) and not is_explicit_wildcard
+        small_exact_match_search = ShouldDoExactSearch( parsed_autocomplete_text )
         
         if small_exact_match_search:
             
-            if not results_cache.CanServeTagResults( strict_search_text, True ):
+            if not results_cache.CanServeTagResults( parsed_autocomplete_text, True ):
                 
                 predicates = HG.client_controller.Read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, file_service_key, search_text = strict_search_text, exact_match = True, add_namespaceless = False, job_key = job_key )
                 
@@ -446,7 +455,7 @@ def WriteFetch( win, job_key, results_callable, parsed_autocomplete_text: Client
                 
             else:
                 
-                cache_valid = results_cache.CanServeTagResults( strict_search_text, False )
+                cache_valid = results_cache.CanServeTagResults( parsed_autocomplete_text, False )
                 
             
             if cache_valid:
@@ -472,31 +481,31 @@ def WriteFetch( win, job_key, results_callable, parsed_autocomplete_text: Client
                 
             
         
+        if not is_explicit_wildcard:
+            
+            # this lets us get sibling data for tags that do not exist with count in the domain
+            
+            # we always do this, because results cache will not have current text input data
+            
+            input_text_predicates = HG.client_controller.Read( 'autocomplete_predicates', ClientTags.TAG_DISPLAY_STORAGE, tag_search_context, file_service_key, search_text = strict_search_text, exact_match = True, add_namespaceless = False, zero_count_ok = True, job_key = job_key )
+            
+            for input_text_predicate in input_text_predicates:
+                
+                if ( input_text_predicate.HasIdealSibling() or input_text_predicate.HasParentPredicates() ) and input_text_predicate not in matches:
+                    
+                    matches.append( input_text_predicate )
+                    
+                
+            
+        
         matches = ClientSearch.SortPredicates( matches )
         
     
     InsertTagPredicates( matches, display_tag_service_key, parsed_autocomplete_text )
     
-    if expand_parents:
-        
-        expanded_matches = []
-        
-        for match in matches:
-            
-            expanded_matches.append( match )
-            
-            if match.HasParentPredicates():
-                
-                expanded_matches.extend( match.GetParentPredicates() )
-                
-            
-        
-        matches = expanded_matches
-        
-    
     HG.client_controller.CallLaterQtSafe( win, 0.0, results_callable, job_key, parsed_autocomplete_text, results_cache, matches )
     
-class ListBoxTagsAC( ClientGUIListBoxes.ListBoxTagsPredicates ):
+class ListBoxTagsPredicatesAC( ClientGUIListBoxes.ListBoxTagsPredicates ):
     
     def __init__( self, parent, callable, service_key, float_mode, **kwargs ):
         
@@ -511,7 +520,7 @@ class ListBoxTagsAC( ClientGUIListBoxes.ListBoxTagsPredicates ):
     
     def _Activate( self, shift_down ) -> bool:
         
-        predicates = list( self._selected_terms )
+        predicates = self._GetPredicatesFromTerms( self._selected_terms )
         
         if self._float_mode:
             
@@ -532,6 +541,18 @@ class ListBoxTagsAC( ClientGUIListBoxes.ListBoxTagsPredicates ):
             
         
         return False
+        
+    
+    def _GenerateTermFromPredicate( self, predicate: ClientSearch.Predicate ):
+        
+        term = ClientGUIListBoxes.ListBoxTagsPredicates._GenerateTermFromPredicate( self, predicate )
+        
+        if predicate.GetType() == ClientSearch.PREDICATE_TYPE_OR_CONTAINER:
+            
+            term.SetORUnderConstruction( True )
+            
+        
+        return term
         
     
     def SetPredicates( self, predicates ):
@@ -567,16 +588,15 @@ class ListBoxTagsAC( ClientGUIListBoxes.ListBoxTagsPredicates ):
             
             self._Clear()
             
-            for predicate in predicates:
-                
-                self._AppendTerm( predicate )
-                
+            terms = [ self._GenerateTermFromPredicate( predicate ) for predicate in predicates ]
+            
+            self._AppendTerms( terms )
             
             self._DataHasChanged()
             
             if len( predicates ) > 0:
                 
-                hit_index = 0
+                logical_index = 0
                 
                 if len( predicates ) > 1:
                     
@@ -599,40 +619,55 @@ class ListBoxTagsAC( ClientGUIListBoxes.ListBoxTagsPredicates ):
                             continue
                             
                         
-                        hit_index = index
+                        logical_index = index
                         
                         break
                         
                     
                 
-                self._Hit( False, False, hit_index )
+                self._Hit( False, False, logical_index )
                 
             
         
     
-    def SetTagService( self, service_key ):
+    def SetTagServiceKey( self, service_key: bytes ):
         
         self._service_key = service_key
         
     
-class ListBoxTagsACRead( ListBoxTagsAC ):
+class ListBoxTagsStringsAC( ClientGUIListBoxes.ListBoxTagsStrings ):
     
-    ors_are_under_construction = True
+    def __init__( self, parent, callable, service_key, float_mode, **kwargs ):
+        
+        ClientGUIListBoxes.ListBoxTagsStrings.__init__( self, parent, service_key = service_key, sort_tags = False, **kwargs )
+        
+        self._callable = callable
+        self._float_mode = float_mode
+        
     
-    def _GetTextFromTerm( self, term ):
+    def _Activate( self, shift_down ) -> bool:
         
-        predicate = term
+        predicates = self._GetPredicatesFromTerms( self._selected_terms )
         
-        return predicate.ToString( render_for_user = True, or_under_construction = self.ors_are_under_construction )
+        if self._float_mode:
+            
+            widget = self.window().parentWidget()
+            
+        else:
+            
+            widget = self
+            
         
-    
-class ListBoxTagsACWrite( ListBoxTagsAC ):
-    
-    def _GetTextFromTerm( self, term ):
+        predicates = ClientGUISearch.FleshOutPredicates( widget, predicates )
         
-        predicate = term
+        if len( predicates ) > 0:
+            
+            self._callable( predicates, shift_down )
+            
+            return True
+            
         
-        return predicate.ToString( tag_display_type = ClientTags.TAG_DISPLAY_STORAGE )
+        return False
         
     
 # much of this is based on the excellent TexCtrlAutoComplete class by Edward Flick, Michele Petrazzo and Will Sadkin, just with plenty of simplification and integration into hydrus
@@ -647,7 +682,7 @@ class AutoCompleteDropdown( QW.QWidget ):
         
         QW.QWidget.__init__( self, parent )
         
-        self._intercept_key_events = True
+        self._can_intercept_unusual_key_events = True
         
         if self.window() == HG.client_controller.gui:
             
@@ -743,6 +778,8 @@ class AutoCompleteDropdown( QW.QWidget ):
         
         self._schedule_results_refresh_job = None
         
+        self._my_shortcut_handler = ClientGUIShortcuts.ShortcutsHandler( self, [ 'tags_autocomplete' ], alternate_filter_target = self._text_ctrl )
+        
         if self._float_mode:
             
             self._widget_event_filter = QP.WidgetEventFilter( self )
@@ -806,7 +843,7 @@ class AutoCompleteDropdown( QW.QWidget ):
         
         self._text_ctrl.blockSignals( True )
         
-        self._text_ctrl.setText( '' )
+        self._text_ctrl.clear()
         
         self._SetResultsToList( [], self._GetParsedAutocompleteText() )
         
@@ -981,7 +1018,7 @@ class AutoCompleteDropdown( QW.QWidget ):
         
         colour = HG.client_controller.new_options.GetColour( CC.COLOUR_AUTOCOMPLETE_BACKGROUND )
         
-        if not self._intercept_key_events:
+        if not self._can_intercept_unusual_key_events:
             
             colour = ClientGUIFunctions.GetLighterDarkerColour( colour )
             
@@ -1023,25 +1060,11 @@ class AutoCompleteDropdown( QW.QWidget ):
         
         ( modifier, key ) = ClientGUIShortcuts.ConvertKeyEventToSimpleTuple( event )
         
-        if key in ( QC.Qt.Key_Insert, ):
-            
-            self._intercept_key_events = not self._intercept_key_events
-            
-            self._UpdateBackgroundColour()
-            
-        elif key == QC.Qt.Key_Space and event.modifiers() & QC.Qt.ControlModifier:
-            
-            self._ScheduleResultsRefresh( 0.0 )
-            
-        elif self._intercept_key_events:
+        if self._can_intercept_unusual_key_events:
             
             send_input_to_current_list = False
             
             current_results_list = self._dropdown_notebook.currentWidget()
-            
-            current_list_is_empty = len( current_results_list ) == 0
-            
-            input_is_empty = self._text_ctrl.text() == ''
             
             if key in ( ord( 'A' ), ord( 'a' ) ) and modifier == QC.Qt.ControlModifier:
                 
@@ -1058,48 +1081,6 @@ class AutoCompleteDropdown( QW.QWidget ):
                 escape_caught = self._HandleEscape()
                 
                 if not escape_caught:
-                    
-                    send_input_to_current_list = True
-                    
-                
-            elif input_is_empty: # maybe we should be sending a 'move' event to a different place
-                
-                if key in ( QC.Qt.Key_Up, QC.Qt.Key_Down ) and current_list_is_empty:
-                    
-                    if key in ( QC.Qt.Key_Up, ):
-                        
-                        self.selectUp.emit()
-                        
-                    elif key in ( QC.Qt.Key_Down, ):
-                        
-                        self.selectDown.emit()
-                        
-                    
-                elif key in ( QC.Qt.Key_PageDown, QC.Qt.Key_PageUp ) and current_list_is_empty:
-                    
-                    if key in ( QC.Qt.Key_PageUp, ):
-                        
-                        self.showPrevious.emit()
-                        
-                    elif key in ( QC.Qt.Key_PageDown, ):
-                        
-                        self.showNext.emit()
-                        
-                    
-                elif key in ( QC.Qt.Key_Right, QC.Qt.Key_Left ):
-                    
-                    if key in ( QC.Qt.Key_Left, ):
-                        
-                        direction = -1
-                        
-                    elif key in ( QC.Qt.Key_Right, ):
-                        
-                        direction = 1
-                        
-                    
-                    self.MoveNotebookPageFocus( direction = direction )
-                    
-                else:
                     
                     send_input_to_current_list = True
                     
@@ -1212,7 +1193,9 @@ class AutoCompleteDropdown( QW.QWidget ):
             
         else:
             
-            if HG.client_controller.new_options.GetBoolean( 'autocomplete_results_fetch_automatically' ):
+            parsed_autocomplete_text = self._GetParsedAutocompleteText()
+            
+            if parsed_autocomplete_text.GetTagAutocompleteOptions().FetchResultsAutomatically():
                 
                 self._ScheduleResultsRefresh( 0.0 )
                 
@@ -1258,6 +1241,83 @@ class AutoCompleteDropdown( QW.QWidget ):
             
             self.setFocus( QC.Qt.OtherFocusReason )
             
+        
+    
+    def ProcessApplicationCommand( self, command: CAC.ApplicationCommand ):
+        
+        command_processed = True
+        
+        data = command.GetData()
+        
+        if command.IsSimpleCommand():
+            
+            action = data
+            
+            if action == CAC.SIMPLE_AUTOCOMPLETE_IME_MODE:
+                
+                self._can_intercept_unusual_key_events = not self._can_intercept_unusual_key_events
+                
+                self._UpdateBackgroundColour()
+                
+            elif self._can_intercept_unusual_key_events:
+                
+                current_results_list = self._dropdown_notebook.currentWidget()
+                
+                current_list_is_empty = len( current_results_list ) == 0
+                
+                input_is_empty = self._text_ctrl.text() == ''
+                
+                everything_is_empty = input_is_empty and current_list_is_empty
+                
+                if action == CAC.SIMPLE_AUTOCOMPLETE_FORCE_FETCH:
+                    
+                    self._ScheduleResultsRefresh( 0.0 )
+                    
+                elif input_is_empty and action in ( CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_TAB_LEFT, CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_TAB_RIGHT ):
+                    
+                    if action == CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_TAB_LEFT:
+                        
+                        direction = -1
+                        
+                    else:
+                        
+                        direction = 1
+                        
+                    
+                    self.MoveNotebookPageFocus( direction = direction )
+                    
+                elif everything_is_empty and action == CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_PAGE_LEFT:
+                    
+                    self.selectUp.emit()
+                    
+                elif everything_is_empty and action == CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_PAGE_RIGHT:
+                    
+                    self.selectDown.emit()
+                    
+                elif everything_is_empty and action == CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_MEDIA_PREVIOUS:
+                    
+                    self.showPrevious.emit()
+                    
+                elif everything_is_empty and action == CAC.SIMPLE_AUTOCOMPLETE_IF_EMPTY_MEDIA_NEXT:
+                    
+                    self.showNext.emit()
+                    
+                else:
+                    
+                    command_processed = False
+                    
+                
+            else:
+                
+                command_processed = False
+                
+            
+        else:
+            
+            command_processed = False
+            
+        
+        return command_processed
         
     
     def SetFetchedResults( self, job_key: ClientThreading.JobKey, parsed_autocomplete_text: ClientSearch.ParsedAutocompleteText, results_cache: ClientSearch.PredicateResultsCache, results: list ):
@@ -1322,9 +1382,15 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
         #
         
         HG.client_controller.sub( self, 'RefreshFavouriteTags', 'notify_new_favourite_tags' )
+        HG.client_controller.sub( self, 'NotifyNewServices', 'notify_new_services' )
         
     
     def _ChangeFileService( self, file_service_key ):
+        
+        if not HG.client_controller.services_manager.ServiceExists( file_service_key ):
+            
+            file_service_key = CC.COMBINED_LOCAL_FILE_SERVICE_KEY
+            
         
         if file_service_key == CC.COMBINED_FILE_SERVICE_KEY and self._tag_service_key == CC.COMBINED_TAG_SERVICE_KEY:
             
@@ -1344,6 +1410,11 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
     
     def _ChangeTagService( self, tag_service_key ):
         
+        if not HG.client_controller.services_manager.ServiceExists( tag_service_key ):
+            
+            tag_service_key = CC.COMBINED_TAG_SERVICE_KEY
+            
+        
         if tag_service_key == CC.COMBINED_TAG_SERVICE_KEY and self._file_service_key == CC.COMBINED_FILE_SERVICE_KEY:
             
             self._ChangeFileService( CC.LOCAL_FILE_SERVICE_KEY )
@@ -1351,7 +1422,8 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
         
         self._tag_service_key = tag_service_key
         
-        self._search_results_list.SetTagService( self._tag_service_key )
+        self._search_results_list.SetTagServiceKey( self._tag_service_key )
+        self._favourites_list.SetTagServiceKey( self._tag_service_key )
         
         self._UpdateTagServiceLabel()
         
@@ -1445,6 +1517,12 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
         CGC.core().PopupMenu( self._file_repo_button, menu )
         
     
+    def NotifyNewServices( self ):
+        
+        self.SetFileServiceKey( self._file_service_key )
+        self.SetTagServiceKey( self._tag_service_key )
+        
+    
     def RefreshFavouriteTags( self ):
         
         favourite_tags = sorted( HG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
@@ -1454,7 +1532,7 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
         self._favourites_list.SetPredicates( predicates )
         
     
-    def SetFileService( self, file_service_key ):
+    def SetFileServiceKey( self, file_service_key ):
         
         self._ChangeFileService( file_service_key )
         
@@ -1467,7 +1545,7 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
             
         
     
-    def SetTagService( self, tag_service_key ):
+    def SetTagServiceKey( self, tag_service_key ):
         
         self._ChangeTagService( tag_service_key )
         
@@ -1796,7 +1874,7 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         height_num_chars = HG.client_controller.new_options.GetInteger( 'ac_read_list_height_num_chars' )
         
-        favs_list = ListBoxTagsACRead( self._dropdown_notebook, self.BroadcastChoices, self._float_mode, self._tag_service_key, height_num_chars = height_num_chars )
+        favs_list = ListBoxTagsPredicatesAC( self._dropdown_notebook, self.BroadcastChoices, self._float_mode, self._tag_service_key, tag_display_type = ClientTags.TAG_DISPLAY_ACTUAL, height_num_chars = height_num_chars )
         
         return favs_list
         
@@ -1805,7 +1883,7 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         height_num_chars = HG.client_controller.new_options.GetInteger( 'ac_read_list_height_num_chars' )
         
-        return ListBoxTagsACRead( self._dropdown_notebook, self.BroadcastChoices, self._tag_service_key, self._float_mode, height_num_chars = height_num_chars )
+        return ListBoxTagsPredicatesAC( self._dropdown_notebook, self.BroadcastChoices, self._tag_service_key, self._float_mode, tag_display_type = ClientTags.TAG_DISPLAY_ACTUAL, height_num_chars = height_num_chars )
         
     
     def _LoadFavouriteSearch( self, folder_name, name ):
@@ -2030,6 +2108,38 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         self._search_pause_play.SetOnOff( False )
         
     
+    def ProcessApplicationCommand( self, command: CAC.ApplicationCommand ):
+        
+        command_processed = True
+        
+        data = command.GetData()
+        
+        if self._can_intercept_unusual_key_events and command.IsSimpleCommand():
+            
+            action = data
+            
+            if action == CAC.SIMPLE_SYNCHRONISED_WAIT_SWITCH:
+                
+                self.PausePlaySearch()
+                
+            else:
+                
+                command_processed = False
+                
+            
+        else:
+            
+            command_processed = False
+            
+        
+        if not command_processed:
+            
+            command_processed = AutoCompleteDropdownTags.ProcessApplicationCommand( self, command )
+            
+        
+        return command_processed
+        
+    
     def SetFetchedResults( self, job_key: ClientThreading.JobKey, parsed_autocomplete_text: ClientSearch.ParsedAutocompleteText, results_cache: ClientSearch.PredicateResultsCache, results: list ):
         
         if self._current_fetch_job_key is not None and self._current_fetch_job_key.GetKey() == job_key.GetKey():
@@ -2114,12 +2224,11 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
         
         if len( initial_predicates ) > 0:
             
-            for predicate in initial_predicates:
-                
-                self._AppendTerm( predicate )
-                
+            terms = [ self._GenerateTermFromPredicate( predicate ) for predicate in initial_predicates ]
             
-            self._SortByText()
+            self._AppendTerms( terms )
+            
+            self._Sort()
             
             self._DataHasChanged()
             
@@ -2129,15 +2238,17 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
     
     def _Activate( self, shift_down ) -> bool:
         
-        if len( self._selected_terms ) > 0:
+        predicates = self._GetPredicatesFromTerms( self._selected_terms )
+        
+        if len( predicates ) > 0:
             
             if shift_down:
                 
-                self._EditPredicates( set( self._selected_terms ) )
+                self._EditPredicates( set( predicates ) )
                 
             else:
                 
-                self._EnterPredicates( set( self._selected_terms ) )
+                self._EnterPredicates( set( predicates ) )
                 
             
             return True
@@ -2148,7 +2259,7 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
     
     def _AddEditMenu( self, menu: QW.QMenu ):
         
-        ( editable_predicates, non_editable_predicates ) = ClientGUISearch.GetEditablePredicates( self._selected_terms )
+        ( editable_predicates, non_editable_predicates ) = ClientGUISearch.GetEditablePredicates( self._GetPredicatesFromTerms( self._selected_terms ) )
         
         if len( editable_predicates ) > 0:
             
@@ -2204,19 +2315,17 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
             return
             
         
-        for predicate in predicates_to_remove:
-            
-            self._RemoveTerm( predicate )
-            
+        terms_to_remove = [ self._GenerateTermFromPredicate( predicate ) for predicate in predicates_to_remove ]
         
-        for predicate in predicates_to_add:
-            
-            self._AppendTerm( predicate )
-            
+        self._RemoveTerms( terms_to_remove )
         
-        self._selected_terms.update( predicates_to_add )
+        terms_to_add = [ self._GenerateTermFromPredicate( predicate ) for predicate in predicates_to_add ]
         
-        self._SortByText()
+        self._AppendTerms( terms_to_add )
+        
+        self._selected_terms.update( terms_to_add )
+        
+        self._Sort()
         
         self._DataHasChanged()
         
@@ -2228,42 +2337,40 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
             return
             
         
-        predicates_to_be_added = set()
-        predicates_to_be_removed = set()
+        terms_to_be_added = set()
+        terms_to_be_removed = set()
         
         for predicate in predicates:
             
             predicate = predicate.GetCountlessCopy()
             
-            if self._HasPredicate( predicate ):
+            term = self._GenerateTermFromPredicate( predicate )
+            
+            if term in self._terms_to_logical_indices:
                 
                 if permit_remove:
                     
-                    predicates_to_be_removed.add( predicate )
+                    terms_to_be_removed.add( term )
                     
                 
             else:
                 
                 if permit_add:
                     
-                    predicates_to_be_added.add( predicate )
+                    terms_to_be_added.add( term )
                     
-                    predicates_to_be_removed.update( self._GetMutuallyExclusivePredicates( predicate ) )
+                    m_e_preds = self._GetMutuallyExclusivePredicates( predicate )
+                    
+                    terms_to_be_removed.update( ( self._GenerateTermFromPredicate( pred ) for pred in m_e_preds ) )
                     
                 
             
         
-        for predicate in predicates_to_be_added:
-            
-            self._AppendTerm( predicate )
-            
+        self._AppendTerms( terms_to_be_added )
         
-        for predicate in predicates_to_be_removed:
-            
-            self._RemoveTerm( predicate )
-            
+        self._RemoveTerms( terms_to_be_removed )
         
-        self._SortByText()
+        self._Sort()
         
         self._DataHasChanged()
         
@@ -2276,13 +2383,6 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
     def _GetCurrentPagePredicates( self ) -> typing.Set[ ClientSearch.Predicate ]:
         
         return self.GetPredicates()
-        
-    
-    def _GetTextFromTerm( self, term ):
-        
-        predicate = term
-        
-        return predicate.ToString( render_for_user = True )
         
     
     def _HasCounts( self ):
@@ -2331,24 +2431,22 @@ class ListBoxTagsActiveSearchPredicates( ClientGUIListBoxes.ListBoxTagsPredicate
         
         self._Clear()
         
-        for predicate in predicates:
-            
-            self._AppendTerm( predicate )
-            
+        terms = [ self._GenerateTermFromPredicate( predicate ) for predicate in predicates ]
         
-        self._SortByText()
+        self._AppendTerms( terms )
+        
+        self._Sort()
         
         self._DataHasChanged()
         
     
 class AutoCompleteDropdownTagsWrite( AutoCompleteDropdownTags ):
     
-    def __init__( self, parent, chosen_tag_callable, expand_parents, file_service_key, tag_service_key, null_entry_callable = None, tag_service_key_changed_callable = None, show_paste_button = False ):
+    def __init__( self, parent, chosen_tag_callable, file_service_key, tag_service_key, null_entry_callable = None, tag_service_key_changed_callable = None, show_paste_button = False ):
         
         self._display_tag_service_key = tag_service_key
         
         self._chosen_tag_callable = chosen_tag_callable
-        self._expand_parents = expand_parents
         self._null_entry_callable = null_entry_callable
         self._tag_service_key_changed_callable = tag_service_key_changed_callable
         
@@ -2432,7 +2530,9 @@ class AutoCompleteDropdownTagsWrite( AutoCompleteDropdownTags ):
         
         height_num_chars = HG.client_controller.new_options.GetInteger( 'ac_write_list_height_num_chars' )
         
-        favs_list = ListBoxTagsACWrite( self._dropdown_notebook, self.BroadcastChoices, self._display_tag_service_key, self._float_mode, height_num_chars = height_num_chars )
+        favs_list = ListBoxTagsStringsAC( self._dropdown_notebook, self.BroadcastChoices, self._display_tag_service_key, self._float_mode, tag_display_type = ClientTags.TAG_DISPLAY_STORAGE, height_num_chars = height_num_chars )
+        
+        favs_list.SetChildRowsAllowed( HG.client_controller.new_options.GetBoolean( 'expand_parents_on_storage_autocomplete_taglists' ) )
         
         return favs_list
         
@@ -2441,7 +2541,11 @@ class AutoCompleteDropdownTagsWrite( AutoCompleteDropdownTags ):
         
         height_num_chars = HG.client_controller.new_options.GetInteger( 'ac_write_list_height_num_chars' )
         
-        return ListBoxTagsACWrite( self._dropdown_notebook, self.BroadcastChoices, self._display_tag_service_key, self._float_mode, height_num_chars = height_num_chars )
+        preds_list = ListBoxTagsPredicatesAC( self._dropdown_notebook, self.BroadcastChoices, self._display_tag_service_key, self._float_mode, tag_display_type = ClientTags.TAG_DISPLAY_STORAGE, height_num_chars = height_num_chars )
+        
+        preds_list.SetChildRowsAllowed( HG.client_controller.new_options.GetBoolean( 'expand_parents_on_storage_autocomplete_taglists' ) )
+        
+        return preds_list
         
     
     def _Paste( self ):
@@ -2516,7 +2620,7 @@ class AutoCompleteDropdownTagsWrite( AutoCompleteDropdownTags ):
         
         tag_search_context = ClientSearch.TagSearchContext( service_key = self._tag_service_key, display_service_key = self._display_tag_service_key )
         
-        HG.client_controller.CallToThread( WriteFetch, self, job_key, self.SetFetchedResults, parsed_autocomplete_text, tag_search_context, self._file_service_key, self._expand_parents, self._results_cache )
+        HG.client_controller.CallToThread( WriteFetch, self, job_key, self.SetFetchedResults, parsed_autocomplete_text, tag_search_context, self._file_service_key, self._results_cache )
         
     
     def _TakeResponsibilityForEnter( self, shift_down ):
@@ -2545,19 +2649,12 @@ class AutoCompleteDropdownTagsWrite( AutoCompleteDropdownTags ):
         
         favourite_tags = sorted( HG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
         
-        predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, tag ) for tag in favourite_tags ]
-        
-        self._favourites_list.SetPredicates( predicates )
+        self._favourites_list.SetTags( favourite_tags )
         
     
     def SetDisplayTagServiceKey( self, service_key ):
         
         self._display_tag_service_key = service_key
-        
-    
-    def SetExpandParents( self, expand_parents ):
-        
-        self._expand_parents = expand_parents
         
     
 class EditAdvancedORPredicates( ClientGUIScrolledPanels.EditPanel ):

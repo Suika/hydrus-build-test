@@ -109,7 +109,7 @@ class DialogPageChooser( ClientGUIDialogs.Dialog ):
         
         self._services = HG.client_controller.services_manager.GetServices()
         
-        repository_petition_permissions = [ ( content_type, HC.PERMISSION_ACTION_OVERRULE ) for content_type in HC.REPOSITORY_CONTENT_TYPES ]
+        repository_petition_permissions = [ ( content_type, HC.PERMISSION_ACTION_MODERATE ) for content_type in HC.REPOSITORY_CONTENT_TYPES ]
         
         self._petition_service_keys = [ service.GetServiceKey() for service in self._services if service.GetServiceType() in HC.REPOSITORIES and True in ( service.HasPermission( content_type, action ) for ( content_type, action ) in repository_petition_permissions ) ]
         
@@ -847,11 +847,6 @@ class Page( QW.QSplitter ):
             
         
     
-    def PausePlaySearch( self ):
-        
-        self._management_panel.PausePlaySearch()
-        
-    
     def _StartInitialMediaResultsLoad( self ):
         
         def qt_code_status( status ):
@@ -1011,6 +1006,9 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         self._previous_page_index = -1
         
         self._UpdateOptions()
+        
+        self.tabBar().installEventFilter( self )
+        self.installEventFilter( self )
         
     
     def _RefreshPageNamesAfterDnD( self, page_widget, source_widget ):
@@ -1619,6 +1617,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
                 can_end = tab_index < end_index - 1
                 
                 if can_home:
+                    
                     ClientGUIMenus.AppendMenuItem( menu, 'move to left end', 'Move this page all the way to the left.', self._ShiftPage, tab_index, new_index=0 )
                     
                 
@@ -1633,14 +1632,20 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
                     
                 
                 if can_end:
+                    
                     ClientGUIMenus.AppendMenuItem( menu, 'move to right end', 'Move this page all the way to the right.', self._ShiftPage, tab_index, new_index=end_index )
                     
                 
-                
                 ClientGUIMenus.AppendSeparator( menu )
                 
-                ClientGUIMenus.AppendMenuItem( menu, 'sort pages by most files first', 'Sort these pages according to how many files they appear to have.', self._SortPagesByFileCount, 'desc' )
-                ClientGUIMenus.AppendMenuItem( menu, 'sort pages by fewest files first', 'Sort these pages according to how few files they appear to have.', self._SortPagesByFileCount, 'asc' )
+                submenu = QW.QMenu( menu )
+                
+                ClientGUIMenus.AppendMenuItem( submenu, 'by most files first', 'Sort these pages according to how many files they appear to have.', self._SortPagesByFileCount, 'desc' )
+                ClientGUIMenus.AppendMenuItem( submenu, 'by fewest files first', 'Sort these pages according to how few files they appear to have.', self._SortPagesByFileCount, 'asc' )
+                ClientGUIMenus.AppendMenuItem( submenu, 'by name a-z', 'Sort these pages according to how many files they appear to have.', self._SortPagesByName, 'asc' )
+                ClientGUIMenus.AppendMenuItem( submenu, 'by name z-a', 'Sort these pages according to how many files they appear to have.', self._SortPagesByName, 'desc' )
+                
+                ClientGUIMenus.AppendMenu( menu, submenu, 'sort pages' )
                 
             
             ClientGUIMenus.AppendSeparator( menu )
@@ -1703,8 +1708,6 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
     
     def _SortPagesByFileCount( self, order ):
         
-        ordered_pages = list( self.GetPages() )
-        
         def key( page ):
             
             ( total_num_files, ( total_num_value, total_num_range ) ) = page.GetNumFileSummary()
@@ -1712,12 +1715,28 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             return ( total_num_files, total_num_range, total_num_value )
             
         
-        ordered_pages.sort( key = key )
+        ordered_pages = sorted( self.GetPages(), key = key, reverse = order == 'desc' )
         
-        if order == 'desc':
+        self._SortPagesSetPages( ordered_pages )
+        
+    
+    def _SortPagesByName( self, order ):
+        
+        def file_count_secondary( page ):
             
-            ordered_pages.reverse()
+            ( total_num_files, ( total_num_value, total_num_range ) ) = page.GetNumFileSummary()
             
+            return ( total_num_files, total_num_range, total_num_value )
+            
+        
+        ordered_pages = sorted( self.GetPages(), key = file_count_secondary, reverse = True )
+        
+        ordered_pages = sorted( ordered_pages, key = lambda page: page.GetName(), reverse = order == 'desc' )
+        
+        self._SortPagesSetPages( ordered_pages )
+        
+    
+    def _SortPagesSetPages( self, ordered_pages ):
         
         selected_page = self.currentWidget()
         
@@ -1738,12 +1757,14 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         for page in ordered_pages:
             
-            is_selected = page == selected_page
-            
             name = pages_to_names[ page ]
             
             self.addTab( page, name )
-            if is_selected: self.setCurrentIndex( self.count() - 1 )
+            
+            if page == selected_page:
+                
+                self.setCurrentIndex( self.count() - 1 )
+                
             
         
     
@@ -1890,20 +1911,73 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             else:
                 
                 self._ClosePage( selection, polite = polite )
+                
+            
         
     
-    def mouseReleaseEvent( self, event ):
+    def eventFilter( self, watched, event ):
         
-        if event.button() != QC.Qt.RightButton:
+        if event.type() in ( QC.QEvent.MouseButtonDblClick, QC.QEvent.MouseButtonRelease ):
             
-            QP.TabWidgetWithDnD.mouseReleaseEvent( self, event )
+            screen_position = QG.QCursor.pos()
             
-            return
+            if watched == self.tabBar():
+                
+                tab_pos = self.tabBar().mapFromGlobal( screen_position )
+                
+                over_a_tab = tab_pos != -1
+                over_tab_greyspace = tab_pos == -1
+                
+            else:
+                
+                over_a_tab = False
+                
+                widget_under_mouse = QW.QApplication.instance().widgetAt( screen_position )
+                
+                if widget_under_mouse is None:
+                    
+                    over_tab_greyspace = None
+                    
+                else:
+                    
+                    if self.count() == 0 and isinstance( widget_under_mouse, QW.QStackedWidget ):
+                        
+                        over_tab_greyspace = True
+                        
+                    else:
+                        
+                        over_tab_greyspace = widget_under_mouse == self
+                        
+                    
+                
+            
+            if event.type() == QC.QEvent.MouseButtonDblClick:
+                
+                if event.button() == QC.Qt.LeftButton and over_tab_greyspace and not over_a_tab:
+                    
+                    self.EventNewPageFromScreenPosition( screen_position )
+                    
+                    return True
+                    
+                
+            elif event.type() == QC.QEvent.MouseButtonRelease:
+                
+                if event.button() == QC.Qt.RightButton and ( over_a_tab or over_tab_greyspace ):
+                    
+                    self.ShowMenuFromScreenPosition( screen_position )
+                    
+                    return True
+                    
+                elif event.button() == QC.Qt.MiddleButton and over_tab_greyspace and not over_a_tab:
+                    
+                    self.EventNewPageFromScreenPosition( screen_position )
+                    
+                    return True
+                    
+                
             
         
-        mouse_position = QG.QCursor.pos()
-        
-        self._ShowMenu( mouse_position )
+        return False
         
     
     def ShowMenuFromScreenPosition( self, position ):
@@ -2625,7 +2699,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         self._controller.pub( 'refresh_page_name', page.GetPageKey() )
         self._controller.pub( 'notify_new_pages' )
         
-        QP.CallAfter( page.Start )
+        page.Start()
         
         if select_page:
             

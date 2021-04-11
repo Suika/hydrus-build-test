@@ -7,12 +7,11 @@ from qtpy import QtWidgets as QW
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusNATPunch
+from hydrus.core.networking import HydrusNATPunch
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client.gui import ClientGUIAsync
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIRatings
@@ -20,6 +19,7 @@ from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
+from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.metadata import ClientRatings
 
 # Option Enums
@@ -534,6 +534,8 @@ class DialogManageUPnP( ClientGUIDialogs.Dialog ):
                 
                 QP.CallAfter( QW.QMessageBox.critical, self, 'Error', 'Could not load mappings:'+os.linesep*2+str(e) )
                 
+                self._status_st.setText( str( e ) )
+                
                 return
                 
             
@@ -545,7 +547,7 @@ class DialogManageUPnP( ClientGUIDialogs.Dialog ):
             
             self._mappings_list.SetData( mappings )
             
-            self._status_st.setText( '' )
+            self._status_st.clear()
             
             if self._external_ip is not None:
                 

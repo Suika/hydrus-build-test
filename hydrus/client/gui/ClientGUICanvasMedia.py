@@ -12,13 +12,13 @@ from hydrus.core import HydrusPaths
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientRendering
-from hydrus.client.gui import ClientGUICommon
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMedia
 from hydrus.client.gui import ClientGUIMediaControls
 from hydrus.client.gui import ClientGUIMPV
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.media import ClientMedia
 
 def ShouldHaveAnimationBar( media, show_action ):
@@ -703,9 +703,9 @@ class AnimationBar( QW.QWidget ):
         
         if len( s ) > 0:
             
-            text_width = painter.fontMetrics().size( QC.Qt.TextSingleLine, s ).width()
+            ( text_size, s ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, s )
             
-            QP.DrawText( painter, my_width - text_width - 3, 3, s )
+            ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, 3, s )
             
         
     
