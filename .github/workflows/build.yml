@@ -15,7 +15,7 @@ jobs:
         with:
           toolchain: stable
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.1.4.2.0
+        uses: Swatinem/rust-cache@v1.2.0
       - name: rust-cargo
         uses: actions-rs/cargo@v1.0.3
         with:
