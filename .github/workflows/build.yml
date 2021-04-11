@@ -17,7 +17,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1.0.1
       - name: rust-cargo
-        uses: actions-rs/cargo@v1.0.1
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: install
           args: pyoxidizer
@@ -136,7 +136,7 @@ jobs:
         with:
           toolchain: stable
       - name: Rust Cargo
-        uses: actions-rs/cargo@v1.0.1
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: install
           args: pyoxidizer
