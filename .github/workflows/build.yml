@@ -184,7 +184,7 @@ jobs:
       - name: Get All Artifacts
         uses: actions/download-artifact@v2
       - name: Display structure of downloaded files
-        run:  apt-get update && apt-get -y install tree && tree
+        run:  sudo apt-get update && sudo apt-get -y install tree && tree
 
   create-release:
     if: false
