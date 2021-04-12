@@ -8,7 +8,7 @@ Name: {userdesktop}\hydrus server; Filename: {app}\server.exe; WorkingDir: {app}
 [Setup]
 InternalCompressLevel=ultra64
 OutputDir=dist
-OutputBaseFilename=Hydrus Network - Windows - Installer
+OutputBaseFilename=HydrusInstaller
 Compression=lzma/ultra64
 AppName=Hydrus Network
 AppVerName=Hydrus Network

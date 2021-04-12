@@ -1,10 +1,9 @@
-name: PyInstaller
+name: Release
 on:
-  pull_request:
-    types: [closed]
-    branches: master
   push:
     branches: master
+    tags:
+      - 'v*'
 
 jobs:
   build-macos:
@@ -65,10 +64,10 @@ jobs:
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2.2.1
         with:
-          name: hydrus-dmg
+          name: MacOS-DMG
           path: HydrusNetwork.dmg
           if-no-files-found: error
-          retention-days: 10
+          retention-days: 2
 
   build-ubuntu:
     runs-on: ubuntu-20.04
@@ -114,10 +113,10 @@ jobs:
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: Hydrus Ubuntu LTS Extract
+          name: Ubuntu-Extract
           path: dist/client
           if-no-files-found: error
-          retention-days: 10
+          retention-days: 2
 
   build-windows:
     runs-on: [windows-latest]
@@ -166,17 +165,18 @@ jobs:
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: Hydrus Windows Extract
+          name: Windows-Extract
           path: dist\Hydrus Network
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: Hydrus Windows Installer
-          path: dist\Hydrus Network - Windows - Installer.exe
+          name: Windows-Install
+          path: dist\HydrusInstaller.exe
           if-no-files-found: error
-          retention-days: 10
+          retention-days: 2
 
   check-artifacts:
+    if: false
     name: Check Artifacts
     runs-on: ubuntu-latest
     needs: [build-windows, build-macos, build-ubuntu]
@@ -187,40 +187,35 @@ jobs:
         run:  sudo apt-get update && sudo apt-get -y install tree && tree
 
   create-release:
-    if: false
     name: Create Release Entry
     runs-on: ubuntu-20.04
-    needs: [check-artifacts]
+    needs: [build-windows, build-macos, build-ubuntu]
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
       - name: Get All Artifacts
         uses: actions/download-artifact@v2
-      - name: Upload Release Asset
-        id: upload-release-asset 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-          asset_path: ./my-artifact.zip
-          asset_name: my-artifact.zip
-          asset_content_type: application/zip
-
+      - name: Extract version metadata
+        id: meta
+        run: |
+          echo "::set-output name=version::${GITHUB_REF##*/}"
+          echo "::set-output name=version_short::${GITHUB_REF##*/v}"
+      - name: Rename Files
+        run: |
+          mv MacOS-DMG/HydrusNetwork.dmg         HydrusNetwork-${{ steps.meta.outputs.version }}.dmg
+          mv Windows-Install/HydrusInstaller.exe HydrusInstaller-${{ steps.meta.outputs.version }}.exe
+          mv Windows-Extract                     Windows-Extract-${{ steps.meta.outputs.version }}
+          mv Ubuntu-Extract                      Ubuntu-Extract-${{ steps.meta.outputs.version }}
+      - name: Compress Directories
+        run: |
+          zip -9 -r Windows-Extract-${{ steps.meta.outputs.version }} Windows-Extract-${{ steps.meta.outputs.version }}.zip
+          zip -9 -r Ubuntu-Extract-${{ steps.meta.outputs.version }} Ubuntu-Extract-${{ steps.meta.outputs.version }}.zip
       - name: Release new
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            Release.txt
-            LICENSE
+            HydrusNetwork-${{ steps.meta.outputs.version }}.dmg
+            HydrusInstaller-${{ steps.meta.outputs.version }}.exe
+            Windows-Extract-${{ steps.meta.outputs.version }}.zip
+            Ubuntu-Extract-${{ steps.meta.outputs.version }}.zip
