@@ -1,7 +1,6 @@
 name: Release
 on:
   push:
-    branches: master
     tags:
       - 'v*'
 
@@ -219,3 +218,5 @@ jobs:
             HydrusInstaller-${{ steps.meta.outputs.version }}.exe
             Windows-Extract-${{ steps.meta.outputs.version }}.zip
             Ubuntu-Extract-${{ steps.meta.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
