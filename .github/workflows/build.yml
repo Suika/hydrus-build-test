@@ -6,6 +6,7 @@ on:
 
 jobs:
   build-macos:
+    if: false
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
@@ -69,7 +70,7 @@ jobs:
           retention-days: 2
 
   build-ubuntu:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-18.04
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -118,6 +119,7 @@ jobs:
           retention-days: 2
 
   build-windows:
+    if: false
     runs-on: [windows-latest]
     steps:
       -
