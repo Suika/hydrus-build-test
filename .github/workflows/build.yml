@@ -72,7 +72,7 @@ jobs:
           architecture: x64
       - name: Cache Qt
         id: cache-qt
-        uses: actions/cache@v2.1.4
+        uses: actions/cache@v2.1.5
         with:
           path: Qt
           key: ${{ runner.os }}-QtCache
