@@ -1,101 +1,60 @@
 name: Release
 on:
+  pull_request:
+    types: [closed]
+    branches: master
   push:
-    tags:
-      - 'v*'
+    branches: master
 
 jobs:
-  build-macos:
-    if: false
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.2.0
-      - name: rust-cargo
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: install
-          args: pyoxidizer
-      - name: Build Hydrus
-        run: |
-          cd $GITHUB_WORKSPACE
-          basename $(rustc --print sysroot) | sed -e "s/^stable-//" > triple.txt
-          pyoxidizer build --release
-          cd build/$(head -n 1 triple.txt)/release
-          mkdir -p "Hydrus Network.app/Contents/MacOS"
-          mkdir -p "Hydrus Network.app/Contents/Resources"
-          mkdir -p "Hydrus Network.app/Contents/Frameworks"
-          mv install/static/icon.icns "Hydrus Network.app/Contents/Resources/icon.icns"
-          cat > "Hydrus Network.app/Contents/Info.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleDisplayName</key>
-            <string>client</string>
-            <key>CFBundleExecutable</key>
-            <string>MacOS/client</string>
-            <key>CFBundleIconFile</key>
-            <string>icon.icns</string>
-            <key>CFBundleIdentifier</key>
-            <string>client</string>
-            <key>CFBundleInfoDictionaryVersion</key>
-            <string>6.0</string>
-            <key>CFBundleName</key>
-            <string>client</string>
-            <key>CFBundlePackageType</key>
-            <string>APPL</string>
-            <key>CFBundleShortVersionString</key>
-            <string>0.0.0</string>
-            <key>NSHighResolutionCapable</key>
-            <string>True</string></dict>
-          </plist>
-          EOF
-          mv install/* "Hydrus Network.app/Contents/MacOS/"
-          rm -rf install
-          cd $GITHUB_WORKSPACE
-          temp_dmg="$(mktemp).dmg"
-          hdiutil create "$temp_dmg" -ov -volname "HydrusNetwork" -fs HFS+ -srcfolder "$GITHUB_WORKSPACE/build/$(head -n 1 triple.txt)/release"
-          hdiutil convert "$temp_dmg" -format UDZO -o HydrusNetwork.dmg
-      - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2.2.1
-        with:
-          name: MacOS-DMG
-          path: HydrusNetwork.dmg
-          if-no-files-found: error
-          retention-days: 2
-
   build-ubuntu:
     runs-on: ubuntu-18.04
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      -
+        name: Checkout
+        uses: actions/checkout@v2
         with:
-          toolchain: stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.2.0
-      - name: rust-cargo
-        uses: actions-rs/cargo@v1.0.3
+          path: hydrus
+      - 
+        name: Setup Python
+        uses: actions/setup-python@v2
         with:
-          command: install
-          args: pyoxidizer
-      - name: Build Hydrus
+          python-version: 3.8
+          architecture: x64
+      #- name: Cache Qt
+      #  id: cache-qt
+      #  uses: actions/cache@v1
+      #  with:
+      #    path: Qt
+      #    key: ${{ runner.os }}-QtCache
+      #- 
+      #  name: Install Qt
+      #  uses: jurplel/install-qt-action@v2
+      #  with:
+      #    install-deps: true
+      #    setup-python: 'false'
+      #    modules: qtcharts qtwidgets qtgui qtcore
+      #    cached: ${{ steps.cache-qt.outputs.cache-hit }}
+      - name: APT Install
         run: |
-          cd $GITHUB_WORKSPACE
-          basename $(rustc --print sysroot) | sed -e "s/^stable-//" > triple.txt
-          pyoxidizer build --release
-          mv build/$(head -n 1 triple.txt)/release/install client-only
-      - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2.2.1
+          sudo apt-get update
+          sudo apt-get install -y libmpv1
+      - name: Pip Installer
+        uses: BSFishy/pip-action@v1
         with:
-          name: Ubuntu-Extract
-          path: client-only
-          if-no-files-found: error
-          retention-days: 2
+          packages: pyinstaller
+          requirements: hydrus/requirements.txt
+      - name: build with pyinstaller
+        run: |
+          cp hydrus/docker/pyinstaller/client.spec client.spec
+          cp hydrus/docker/pyinstaller/server.spec server.spec
+          pyinstaller server.spec
+          pyinstaller client.spec
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Hydrus Ubuntu LTS Extract
+          path: dist/client
 
   build-windows:
     runs-on: [windows-latest]
@@ -153,47 +112,3 @@ jobs:
           path: dist\HydrusInstaller.exe
           if-no-files-found: error
           retention-days: 2
-
-  check-artifacts:
-    name: Check Artifacts
-    runs-on: ubuntu-latest
-    needs: [build-ubuntu]
-    steps:
-      - name: Get All Artifacts
-        uses: actions/download-artifact@v2
-      - name: Display structure of downloaded files
-        run:  sudo apt-get update && sudo apt-get -y install tree && tree
-
-  create-release:
-    name: Create Release Entry
-    runs-on: ubuntu-20.04
-    needs: [build-windows, build-ubuntu]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      - name: Get All Artifacts
-        uses: actions/download-artifact@v2
-      - name: Extract version metadata
-        id: meta
-        run: |
-          echo "::set-output name=version::${GITHUB_REF##*/}"
-          echo "::set-output name=version_short::${GITHUB_REF##*/v}"
-      - name: Rename Files
-        run: |
-          mv Windows-Install/HydrusInstaller.exe HydrusInstaller-${{ steps.meta.outputs.version }}.exe
-          mv Windows-Extract                     Windows-Extract-${{ steps.meta.outputs.version }}
-          mv Ubuntu-Extract                      Ubuntu-Extract-${{ steps.meta.outputs.version }}
-      - name: Compress Directories
-        run: |
-          zip -9 -r Windows-Extract-${{ steps.meta.outputs.version }}.zip Windows-Extract-${{ steps.meta.outputs.version }}
-          zip -9 -r Ubuntu-Extract-${{ steps.meta.outputs.version }}.zip  Ubuntu-Extract-${{ steps.meta.outputs.version }}
-      - name: Release new
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            HydrusInstaller-${{ steps.meta.outputs.version }}.exe
-            Windows-Extract-${{ steps.meta.outputs.version }}.zip
-            Ubuntu-Extract-${{ steps.meta.outputs.version }}.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
