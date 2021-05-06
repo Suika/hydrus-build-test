@@ -271,7 +271,7 @@ class NetworkJob( object ):
         return ( connect_timeout, read_timeout )
         
     
-    def _SendRequestAndGetResponse( self ):
+    def _SendRequestAndGetResponse( self ) -> requests.Response:
         
         with self._lock:
             
@@ -1334,6 +1334,31 @@ class NetworkJob( object ):
                     
                     self._WaitOnConnectionError( 'read timed out' )
                     
+                except Exception as e:
+                    
+                    if '\'Retry\' has no attribute' in str( e ):
+                        
+                        # this is that weird requests 2.25.x(?) urllib3 maybe thread safety error
+                        # we'll just try and pause a bit I guess!
+                        
+                        self._current_connection_attempt_number += 1
+                        
+                        if self._CanReattemptConnection():
+                            
+                            self.engine.domain_manager.ReportNetworkInfrastructureError( self._url )
+                            
+                        else:
+                            
+                            raise HydrusExceptions.ConnectionException( 'Could not connect!' )
+                            
+                        
+                        self._WaitOnConnectionError( 'connection failed, and could not recover neatly' )
+                        
+                    else:
+                        
+                        raise
+                        
+                    
                 finally:
                     
                     with self._lock:
@@ -1659,7 +1684,7 @@ class NetworkJobHydrus( NetworkJob ):
         NetworkJob._ReportDataUsed( self, num_bytes )
         
     
-    def _SendRequestAndGetResponse( self ):
+    def _SendRequestAndGetResponse( self ) -> requests.Response:
         
         service = self.engine.controller.services_manager.GetService( self._service_key )
         
@@ -1674,7 +1699,7 @@ class NetworkJobHydrus( NetworkJob ):
         
         response = NetworkJob._SendRequestAndGetResponse( self )
         
-        if service_type in HC.RESTRICTED_SERVICES:
+        if response.ok and service_type in HC.RESTRICTED_SERVICES:
             
             self._CheckHydrusVersion( service_type, response )
             

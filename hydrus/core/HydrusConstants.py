@@ -33,10 +33,12 @@ else:
         BASE_DIR = os.getcwd()
         
 
-PLATFORM_WINDOWS = sys.platform == 'win32'
-PLATFORM_MACOS  = sys.platform == 'darwin'
-PLATFORM_LINUX = sys.platform == 'linux'
-PLATFORM_HAIKU = sys.platform == 'haiku1'
+muh_platform = sys.platform.lower()
+
+PLATFORM_WINDOWS = muh_platform == 'win32'
+PLATFORM_MACOS = muh_platform == 'darwin'
+PLATFORM_LINUX = muh_platform == 'linux'
+PLATFORM_HAIKU = muh_platform == 'haiku1'
 
 RUNNING_FROM_SOURCE = sys.argv[0].endswith( '.py' ) or sys.argv[0].endswith( '.pyw' )
 RUNNING_FROM_MACOS_APP = os.path.exists( os.path.join( BASE_DIR, 'running_from_app' ) )
@@ -79,8 +81,8 @@ options = {}
 # Misc
 
 NETWORK_VERSION = 20
-SOFTWARE_VERSION = 434
-CLIENT_API_VERSION = 15
+SOFTWARE_VERSION = 438
+CLIENT_API_VERSION = 16
 
 SERVER_THUMBNAIL_DIMENSIONS = ( 200, 200 )
 
@@ -322,6 +324,9 @@ permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNTS, PERMISSION_ACTION_MODERA
 permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNT_TYPES, None ) ] = 'cannot change account types'
 permission_pair_string_lookup[ ( CONTENT_TYPE_ACCOUNT_TYPES, PERMISSION_ACTION_MODERATE ) ] = 'can manage account types completely'
 
+permission_pair_string_lookup[ ( CONTENT_TYPE_OPTIONS, None ) ] = 'cannot change service options'
+permission_pair_string_lookup[ ( CONTENT_TYPE_OPTIONS, PERMISSION_ACTION_MODERATE ) ] = 'can manage service options completely'
+
 permission_pair_string_lookup[ ( CONTENT_TYPE_SERVICES, None ) ] = 'cannot change services'
 permission_pair_string_lookup[ ( CONTENT_TYPE_SERVICES, PERMISSION_ACTION_MODERATE ) ] = 'can manage services completely'
 
@@ -396,6 +401,7 @@ RATINGS_SERVICES = ( LOCAL_RATING_LIKE, LOCAL_RATING_NUMERICAL, RATING_LIKE_REPO
 REPOSITORIES = ( TAG_REPOSITORY, FILE_REPOSITORY, RATING_LIKE_REPOSITORY, RATING_NUMERICAL_REPOSITORY )
 RESTRICTED_SERVICES = REPOSITORIES + ( SERVER_ADMIN, MESSAGE_DEPOT )
 REMOTE_SERVICES = RESTRICTED_SERVICES + ( IPFS, )
+REMOTE_FILE_SERVICES = ( FILE_REPOSITORY, IPFS )
 FILE_SERVICES = LOCAL_FILE_SERVICES + ( FILE_REPOSITORY, IPFS )
 REAL_TAG_SERVICES = ( LOCAL_TAG, TAG_REPOSITORY )
 ADDREMOVABLE_SERVICES = ( LOCAL_TAG, LOCAL_RATING_LIKE, LOCAL_RATING_NUMERICAL, FILE_REPOSITORY, TAG_REPOSITORY, SERVER_ADMIN, IPFS )

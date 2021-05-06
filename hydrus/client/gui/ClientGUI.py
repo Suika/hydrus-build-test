@@ -60,6 +60,7 @@ from hydrus.client.gui import ClientGUIMPV
 from hydrus.client.gui import ClientGUIPages
 from hydrus.client.gui import ClientGUIParsing
 from hydrus.client.gui import ClientGUIPopupMessages
+from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIScrolledPanelsEdit
 from hydrus.client.gui import ClientGUIScrolledPanelsManagement
 from hydrus.client.gui import ClientGUIScrolledPanelsReview
@@ -70,6 +71,7 @@ from hydrus.client.gui import ClientGUIStyle
 from hydrus.client.gui import ClientGUISubscriptions
 from hydrus.client.gui import ClientGUISystemTray
 from hydrus.client.gui import ClientGUITags
+from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindows
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
@@ -102,6 +104,15 @@ def THREADUploadPending( service_key ):
         
         service = HG.client_controller.services_manager.GetService( service_key )
         
+        account = service.GetAccount()
+        
+        if account.IsUnknown():
+            
+            HydrusData.ShowText( 'Your account is currently unsynced, so the upload was cancelled. Please refresh the account under _review services_.' )
+            
+            return
+            
+        
         service_name = service.GetName()
         service_type = service.GetServiceType()
         
@@ -111,11 +122,92 @@ def THREADUploadPending( service_key ):
         
         nums_pending = HG.client_controller.Read( 'nums_pending' )
         
-        info = nums_pending[ service_key ]
+        nums_pending_for_this_service = nums_pending[ service_key ]
         
-        initial_num_pending = sum( info.values() )
+        content_types_for_this_service = set()
         
-        result = HG.client_controller.Read( 'pending', service_key )
+        if service_type in ( HC.IPFS, HC.FILE_REPOSITORY ):
+            
+            content_types_for_this_service = { HC.CONTENT_TYPE_FILES }
+            
+        elif service_type == HC.TAG_REPOSITORY:
+            
+            content_types_for_this_service = { HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_TYPE_TAG_SIBLINGS }
+            
+        
+        if service_type in HC.REPOSITORIES:
+            
+            unauthorised_content_types = set()
+            content_types_to_request = set()
+            
+            content_types_to_count_types_and_permissions = {
+                HC.CONTENT_TYPE_FILES : ( ( HC.SERVICE_INFO_NUM_PENDING_FILES, HC.PERMISSION_ACTION_CREATE ), ( HC.SERVICE_INFO_NUM_PETITIONED_FILES, HC.PERMISSION_ACTION_PETITION ) ),
+                HC.CONTENT_TYPE_MAPPINGS : ( ( HC.SERVICE_INFO_NUM_PENDING_MAPPINGS, HC.PERMISSION_ACTION_CREATE ), ( HC.SERVICE_INFO_NUM_PETITIONED_MAPPINGS, HC.PERMISSION_ACTION_PETITION ) ),
+                HC.CONTENT_TYPE_TAG_PARENTS : ( ( HC.SERVICE_INFO_NUM_PENDING_TAG_PARENTS, HC.PERMISSION_ACTION_PETITION ), ( HC.SERVICE_INFO_NUM_PETITIONED_TAG_PARENTS, HC.PERMISSION_ACTION_PETITION ) ),
+                HC.CONTENT_TYPE_TAG_SIBLINGS : ( ( HC.SERVICE_INFO_NUM_PENDING_TAG_SIBLINGS, HC.PERMISSION_ACTION_PETITION ), ( HC.SERVICE_INFO_NUM_PETITIONED_TAG_SIBLINGS, HC.PERMISSION_ACTION_PETITION ) )
+            }
+            
+            for content_type in content_types_for_this_service:
+                
+                for ( count_type, permission ) in content_types_to_count_types_and_permissions[ content_type ]:
+                    
+                    if count_type not in nums_pending_for_this_service:
+                        
+                        continue
+                        
+                    
+                    num_pending = nums_pending_for_this_service[ count_type ]
+                    
+                    if num_pending == 0:
+                        
+                        continue
+                        
+                    
+                    if account.HasPermission( content_type, permission ):
+                        
+                        content_types_to_request.add( content_type )
+                        
+                    else:
+                        
+                        unauthorised_content_types.add( content_type )
+                        
+                    
+                
+            
+            if len( unauthorised_content_types ) > 0:
+                
+                message = 'Unfortunately, your account ({}) does not have full permission to upload all your pending content of type ({})!'.format(
+                    account.GetAccountType().GetTitle(),
+                    ', '.join( ( HC.content_type_string_lookup[ content_type ] for content_type in unauthorised_content_types ) )
+                )
+                
+                message += os.linesep * 2
+                message += 'If you are currently using a public, read-only account (such as with the PTR), please check this service under _manage services_ and see if the server allows you to auto-create a more powerful account to replace the public one. If accounts cannot be automatically created, you may have to contact the server owner directly.'
+                message += os.linesep * 2
+                message += 'If you think your account does have this permission, try refreshing it under _review services_.'
+                
+                unauthorised_job_key = ClientThreading.JobKey()
+                
+                unauthorised_job_key.SetVariable( 'popup_title', 'some data was not uploaded!' )
+                
+                unauthorised_job_key.SetVariable( 'popup_text_1', message )
+                
+                if len( content_types_to_request ) > 0:
+                    
+                    unauthorised_job_key.Delete( 5 )
+                    
+                
+                HG.client_controller.pub( 'message', unauthorised_job_key )
+                
+            
+        else:
+            
+            content_types_to_request = content_types_for_this_service
+            
+        
+        initial_num_pending = sum( nums_pending_for_this_service.values() )
+        
+        result = HG.client_controller.Read( 'pending', service_key, content_types_to_request )
         
         HG.client_controller.pub( 'message', job_key )
         
@@ -123,9 +215,9 @@ def THREADUploadPending( service_key ):
             
             nums_pending = HG.client_controller.Read( 'nums_pending' )
             
-            info = nums_pending[ service_key ]
+            nums_pending_for_this_service = nums_pending[ service_key ]
             
-            remaining_num_pending = sum( info.values() )
+            remaining_num_pending = sum( nums_pending_for_this_service.values() )
             
             # sometimes more come in while we are pending, -754/1,234 ha ha
             num_to_do = max( initial_num_pending, remaining_num_pending )
@@ -236,7 +328,7 @@ def THREADUploadPending( service_key ):
             
             HG.client_controller.WaitUntilViewFree()
             
-            result = HG.client_controller.Read( 'pending', service_key )
+            result = HG.client_controller.Read( 'pending', service_key, content_types_to_request )
             
         
         job_key.DeleteVariable( 'popup_gauge_1' )
@@ -245,7 +337,15 @@ def THREADUploadPending( service_key ):
         HydrusData.Print( job_key.ToString() )
         
         job_key.Finish()
-        job_key.Delete( 5 )
+        
+        if len( content_types_to_request ) == 0:
+            
+            job_key.Delete()
+            
+        else:
+            
+            job_key.Delete( 5 )
+            
         
     except Exception as e:
         
@@ -270,7 +370,7 @@ def THREADUploadPending( service_key ):
         
         if service_type == HC.TAG_REPOSITORY:
             
-            types_to_clear = (
+            types_to_delete = (
                 HC.SERVICE_INFO_NUM_PENDING_MAPPINGS,
                 HC.SERVICE_INFO_NUM_PENDING_TAG_SIBLINGS,
                 HC.SERVICE_INFO_NUM_PENDING_TAG_PARENTS,
@@ -281,13 +381,13 @@ def THREADUploadPending( service_key ):
             
         elif service_type in ( HC.FILE_REPOSITORY, HC.IPFS ):
             
-            types_to_clear = (
+            types_to_delete = (
                 HC.SERVICE_INFO_NUM_PENDING_FILES,
                 HC.SERVICE_INFO_NUM_PETITIONED_FILES
             )
             
         
-        HG.client_controller.Write( 'delete_service_info', service_key, types_to_clear )
+        HG.client_controller.Write( 'delete_service_info', service_key, types_to_delete )
         
         HG.currently_uploading_pending = False
         HG.client_controller.pub( 'notify_new_pending' )
@@ -537,6 +637,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         library_versions.append( ( 'temp dir', HydrusPaths.GetCurrentTempDir() ) )
         library_versions.append( ( 'db journal mode', HG.db_journal_mode ) )
         library_versions.append( ( 'db cache size per file', '{}MB'.format( HG.db_cache_size ) ) )
+        library_versions.append( ( 'db transaction commit period', '{}'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HG.db_cache_size ) ) ) )
         library_versions.append( ( 'db synchronous value', str( HG.db_synchronous ) ) )
         library_versions.append( ( 'db using memory for temp?', str( HG.no_db_temp_files ) ) )
         
@@ -1154,6 +1255,20 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
+    def _DebugResetColumnListManager( self ):
+        
+        message = 'This will reset all saved column widths for all multi-column lists across the program. You may need to restart the client to see changes.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message )
+        
+        if result != QW.QDialog.Accepted:
+            
+            return
+            
+        
+        self._controller.column_list_manager.ResetToDefaults()
+        
+    
     def _DebugShowGarbageDifferences( self ):
         
         count = collections.Counter()
@@ -1327,17 +1442,37 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
-    def _DeleteServiceInfo( self ):
+    def _DeleteServiceInfo( self, only_pending = False ):
         
-        message = 'This clears the cached counts for things like the number of files or tags on a service. Due to unusual situations and little counting bugs, these numbers can sometimes become unsynced. Clearing them forces an accurate recount from source.'
-        message += os.linesep * 2
-        message += 'Some GUI elements (review services, mainly) may be slow the next time they launch.'
+        if only_pending:
+            
+            types_to_delete = (
+                HC.SERVICE_INFO_NUM_PENDING_MAPPINGS,
+                HC.SERVICE_INFO_NUM_PENDING_TAG_SIBLINGS,
+                HC.SERVICE_INFO_NUM_PENDING_TAG_PARENTS,
+                HC.SERVICE_INFO_NUM_PETITIONED_MAPPINGS,
+                HC.SERVICE_INFO_NUM_PETITIONED_TAG_SIBLINGS,
+                HC.SERVICE_INFO_NUM_PETITIONED_TAG_PARENTS,
+                HC.SERVICE_INFO_NUM_PENDING_FILES,
+                HC.SERVICE_INFO_NUM_PETITIONED_FILES
+            )
+            
+            message = 'This will clear and regen the number for the pending menu up top. Due to unusual situations and little counting bugs, these numbers can sometimes become unsynced. It should not take long at all, and will update instantly if changed.'
+            
+        else:
+            
+            types_to_delete = None
+            
+            message = 'This clears the cached counts for things like the number of files or tags on a service. Due to unusual situations and little counting bugs, these numbers can sometimes become unsynced. Clearing them forces an accurate recount from source.'
+            message += os.linesep * 2
+            message += 'Some GUI elements (review services, mainly) may be slow the next time they launch.'
+            
         
         result = ClientGUIDialogsQuick.GetYesNo( self, message )
         
         if result == QW.QDialog.Accepted:
             
-            self._controller.Write( 'delete_service_info' )
+            self._controller.Write( 'delete_service_info', types_to_delete = types_to_delete )
             
         
     
@@ -1428,6 +1563,29 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
         return -1
+        
+    
+    def _FixLogicallyInconsistentMappings( self ):
+        
+        message = 'This will check for tags that are occupying mutually exclusive states--either current & pending or deleted & petitioned.'
+        message += os.linesep * 2
+        message += 'Please run this if you attempt to upload some tags and get a related error. You may need some follow-up regeneration work to correct autocomplete or \'num pending\' counts.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'fix_logically_inconsistent_mappings', tag_service_key = tag_service_key )
+            
         
     
     def _FlipClipboardWatcher( self, option_name ):
@@ -1946,7 +2104,9 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 
                 if load_a_blank_page:
                     
-                    self._notebook.NewPageQuery( CC.LOCAL_FILE_SERVICE_KEY, on_deepest_notebook = True )
+                    default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
+                    
+                    self._notebook.NewPageQuery( default_local_file_service_key, on_deepest_notebook = True )
                     
                 else:
                     
@@ -2562,6 +2722,74 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
+    def _ManageServiceOptionsUpdatePeriod( self, service_key ):
+        
+        service = self._controller.services_manager.GetService( service_key )
+        
+        update_period = service.GetUpdatePeriod()
+        
+        with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit update period' ) as dlg:
+            
+            panel = ClientGUIScrolledPanels.EditSingleCtrlPanel( dlg )
+            
+            height_num_chars = 20
+            
+            control = ClientGUITime.TimeDeltaCtrl( panel, min = HydrusNetwork.MIN_UPDATE_PERIOD, days = True, hours = True, minutes = True, seconds=True )
+            
+            control.SetValue( update_period )
+            
+            panel.SetControl( control )
+            
+            dlg.SetPanel( panel )
+            
+            if dlg.exec() == QW.QDialog.Accepted:
+                
+                update_period = control.GetValue()
+                
+                if update_period > HydrusNetwork.MAX_UPDATE_PERIOD:
+                    
+                    QW.QMessageBox.information( self, 'Information', 'Sorry, the value you entered was too high. The max is {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MAX_UPDATE_PERIOD ) ) )
+                    
+                    return
+                    
+                
+                job_key = ClientThreading.JobKey()
+                
+                job_key.SetVariable( 'popup_title', 'setting update period' )
+                job_key.SetVariable( 'popup_text_1', 'uploading\u2026' )
+                
+                self._controller.pub( 'message', job_key )
+                
+                def work_callable():
+                    
+                    service.Request( HC.POST, 'options_update_period', { 'update_period' : update_period } )
+                    
+                    return 1
+                    
+                
+                def publish_callable( gumpf ):
+                    
+                    job_key.SetVariable( 'popup_text_1', 'done!' )
+                    
+                    job_key.Finish()
+                    
+                    service.DoAFullMetadataResync()
+                    
+                
+                def errback_ui_cleanup_callable():
+                    
+                    job_key.SetVariable( 'popup_text_1', 'error!' )
+                    
+                    job_key.Finish()
+                    
+                
+                job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable, errback_ui_cleanup_callable = errback_ui_cleanup_callable )
+                
+                job.start()
+                
+            
+        
+    
     def _ManageSubscriptions( self ):
         
         def qt_do_it( subscriptions, missing_query_log_container_names, surplus_query_log_container_names, original_pause_status ):
@@ -2913,7 +3141,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         service = self._controller.services_manager.GetService( service_key )
         
-        with ClientGUIDialogs.DialogTextEntry( self, 'Enter the account key for the account to be modified.' ) as dlg:
+        with ClientGUIDialogs.DialogTextEntry( self, 'Enter the account id for the account to be modified.' ) as dlg:
             
             if dlg.exec() == QW.QDialog.Accepted:
                 
@@ -2923,7 +3151,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                 except:
                     
-                    QW.QMessageBox.critical( self, 'Error', 'Could not parse that account key' )
+                    QW.QMessageBox.critical( self, 'Error', 'Could not parse that account id' )
                     
                     return
                     
@@ -3146,7 +3374,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         message = 'This will delete and then recreate the pending tags on the tag \'display\' mappings cache, which is used for user-presented tag searching, loading, and autocomplete counts. This is useful if you have \'ghost\' pending tags or counts hanging around.'
         message += os.linesep * 2
-        message += 'If you have a millions of pending tags, it can take a long time, during which the gui may hang.'
+        message += 'If you have a millions of tags, pending or current, it can take a long time, during which the gui may hang.'
         message += os.linesep * 2
         message += 'If you do not have a specific reason to run this, it is pointless.'
         
@@ -3191,6 +3419,31 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 
             
             self._controller.Write( 'regenerate_tag_mappings_cache', tag_service_key = tag_service_key )
+            
+        
+    
+    def _RegenerateTagPendingMappingsCache( self ):
+        
+        message = 'This will delete and then recreate the pending tags on the whole tag mappings cache, which is used for multiple kinds of tag searching, loading, and autocomplete counts. This is useful if you have \'ghost\' pending tags or counts hanging around.'
+        message += os.linesep * 2
+        message += 'If you have a millions of tags, pending or current, it can take a long time, during which the gui may hang.'
+        message += os.linesep * 2
+        message += 'If you do not have a specific reason to run this, it is pointless.'
+        
+        result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it--now choose which service', no_label = 'forget it' )
+        
+        if result == QW.QDialog.Accepted:
+            
+            try:
+                
+                tag_service_key = GetTagServiceKeyForMaintenance( self )
+                
+            except HydrusExceptions.CancelledException:
+                
+                return
+                
+            
+            self._controller.Write( 'regenerate_tag_pending_mappings_cache', tag_service_key = tag_service_key )
             
         
     
@@ -3434,7 +3687,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
     
     def _ReviewServices( self ):
         
-        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, self._controller.PrepStringForDisplay( 'Review Services' ), 'review_services' )
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'review services', 'review_services' )
         
         panel = ClientGUIClientsideServices.ReviewServicesPanel( frame, self._controller )
         
@@ -3746,11 +3999,13 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         def qt_open_pages():
             
+            default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
+            
             page_of_pages = self._notebook.NewPagesNotebook( on_deepest_notebook = False, select_page = True )
             
             t = 0.25
             
-            HG.client_controller.CallLaterQtSafe(self, t, self._notebook.NewPageQuery, CC.LOCAL_FILE_SERVICE_KEY, page_name ='test', on_deepest_notebook = True)
+            HG.client_controller.CallLaterQtSafe(self, t, self._notebook.NewPageQuery, default_local_file_service_key, page_name ='test', on_deepest_notebook = True)
             
             t += 0.25
             
@@ -3758,7 +4013,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             t += 0.25
             
-            HG.client_controller.CallLaterQtSafe(self, t, page_of_pages.NewPageQuery, CC.LOCAL_FILE_SERVICE_KEY, page_name ='test', on_deepest_notebook = False)
+            HG.client_controller.CallLaterQtSafe(self, t, page_of_pages.NewPageQuery, default_local_file_service_key, page_name ='test', on_deepest_notebook = False)
             
             t += 0.25
             
@@ -3820,9 +4075,11 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         def qt_test_ac():
             
+            default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
+            
             SYS_PRED_REFRESH = 1.0
             
-            page = self._notebook.NewPageQuery( CC.LOCAL_FILE_SERVICE_KEY, page_name = 'test', select_page = True )
+            page = self._notebook.NewPageQuery( default_local_file_service_key, page_name = 'test', select_page = True )
             
             t = 0.5
             
@@ -4295,6 +4552,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         elif name == 'daemon_report_mode':
             
             HG.daemon_report_mode = not HG.daemon_report_mode
+            
+        elif name == 'cache_report_mode':
+            
+            HG.cache_report_mode = not HG.cache_report_mode
             
         elif name == 'callto_profile_mode':
             
@@ -5087,15 +5348,18 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             ClientGUIMenus.AppendMenuItem( submenu, 'database integrity', 'Have the database examine all its records for internal consistency.', self._CheckDBIntegrity )
             ClientGUIMenus.AppendMenuItem( submenu, 'repopulate truncated mappings tables', 'Use the mappings cache to try to repair a previously damaged mappings file.', self._RepopulateMappingsTables )
+            ClientGUIMenus.AppendMenuItem( submenu, 'fix logically inconsistent mappings', 'Remove tags that are occupying two mutually exclusive states.', self._FixLogicallyInconsistentMappings )
             ClientGUIMenus.AppendMenuItem( submenu, 'fix invalid tags', 'Scan the database for invalid tags.', self._RepairInvalidTags )
             
             ClientGUIMenus.AppendMenu( menu, submenu, 'check and repair' )
             
             submenu = QW.QMenu( menu )
             
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag storage mappings cache', 'Delete and recreate the tag mappings cache, fixing any miscounts.', self._RegenerateTagMappingsCache )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache (deferred siblings & parents calculation)', 'Delete and recreate the tag display mappings cache, fixing any miscounts.', self._RegenerateTagDisplayMappingsCache )
-            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache (just pending tags, instant calculation)', 'Delete and recreate the tag display pending mappings cache, fixing any miscounts.', self._RegenerateTagDisplayPendingMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'total pending count, in the pending menu', 'Regenerate the pending count up top.', self._DeleteServiceInfo, only_pending = True )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag storage mappings cache (all, with deferred siblings & parents calculation)', 'Delete and recreate the tag mappings cache, fixing bad tags or miscounts.', self._RegenerateTagMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag storage mappings cache (just pending tags, instant calculation)', 'Delete and recreate the tag pending mappings cache, fixing bad tags or miscounts.', self._RegenerateTagPendingMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache (all, deferred siblings & parents calculation)', 'Delete and recreate the tag display mappings cache, fixing bad tags or miscounts.', self._RegenerateTagDisplayMappingsCache )
+            ClientGUIMenus.AppendMenuItem( submenu, 'tag display mappings cache (just pending tags, instant calculation)', 'Delete and recreate the tag display pending mappings cache, fixing bad tags or miscounts.', self._RegenerateTagDisplayPendingMappingsCache )
             ClientGUIMenus.AppendMenuItem( submenu, 'tag siblings lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagSiblingsLookupCache )
             ClientGUIMenus.AppendMenuItem( submenu, 'tag parents lookup cache', 'Delete and recreate the tag siblings cache.', self._RegenerateTagParentsLookupCache )
             ClientGUIMenus.AppendMenuItem( submenu, 'tag text search cache', 'Delete and regenerate the cache hydrus uses for fast tag search.', self._RegenerateTagCache )
@@ -5265,7 +5529,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             ClientGUIMenus.AppendMenuItem( menu, 'review services', 'Look at the services your client connects to.', self._ReviewServices )
             ClientGUIMenus.AppendMenuItem( menu, 'manage services', 'Edit the services your client connects to.', self._ManageServices )
             
-            repository_admin_permissions = [ ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE ), ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE ), ( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_MODERATE ) ]
+            repository_admin_permissions = [ ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE ), ( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE ), ( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_MODERATE ), ( HC.CONTENT_TYPE_OPTIONS, HC.PERMISSION_ACTION_MODERATE ) ]
             
             repositories = self._controller.services_manager.GetServices( HC.REPOSITORIES )
             admin_repositories = [ service for service in repositories if True in ( service.HasPermission( content_type, action ) for ( content_type, action ) in repository_admin_permissions ) ]
@@ -5285,10 +5549,13 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                     
                     service_key = service.GetServiceKey()
                     
+                    service_type = service.GetServiceType()
+                    
                     can_create_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_CREATE )
                     can_overrule_accounts = service.HasPermission( HC.CONTENT_TYPE_ACCOUNTS, HC.PERMISSION_ACTION_MODERATE )
                     can_overrule_account_types = service.HasPermission( HC.CONTENT_TYPE_ACCOUNT_TYPES, HC.PERMISSION_ACTION_MODERATE )
                     can_overrule_services = service.HasPermission( HC.CONTENT_TYPE_SERVICES, HC.PERMISSION_ACTION_MODERATE )
+                    can_overrule_options = service.HasPermission( HC.CONTENT_TYPE_OPTIONS, HC.PERMISSION_ACTION_MODERATE )
                     
                     if can_overrule_accounts:
                         
@@ -5296,7 +5563,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                         ClientGUIMenus.AppendMenuItem( submenu, 'modify an account', 'Modify a specific account\'s type and expiration.', self._ModifyAccount, service_key )
                         
                     
-                    if can_overrule_accounts and service.GetServiceType() == HC.FILE_REPOSITORY:
+                    if can_overrule_accounts and service_type == HC.FILE_REPOSITORY:
                         
                         ClientGUIMenus.AppendMenuItem( submenu, 'get an uploader\'s ip address', 'Fetch the ip address that uploaded a specific file, if the service knows it.', self._FetchIP, service_key )
                         
@@ -5305,7 +5572,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                         
                         ClientGUIMenus.AppendSeparator( submenu )
                         
-                        ClientGUIMenus.AppendMenuItem( submenu, 'create new accounts', 'Create new account keys for this service.', self._GenerateNewAccounts, service_key )
+                        ClientGUIMenus.AppendMenuItem( submenu, 'create new accounts', 'Create new accounts for this service.', self._GenerateNewAccounts, service_key )
                         
                     
                     if can_overrule_account_types:
@@ -5315,7 +5582,14 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                         ClientGUIMenus.AppendMenuItem( submenu, 'manage account types', 'Add, edit and delete account types for this service.', self._STARTManageAccountTypes, service_key )
                         
                     
-                    if can_overrule_services and service.GetServiceType() == HC.SERVER_ADMIN:
+                    if can_overrule_options and service_type in HC.REPOSITORIES:
+                        
+                        ClientGUIMenus.AppendSeparator( submenu )
+                        
+                        ClientGUIMenus.AppendMenuItem( submenu, 'change update period', 'Change the update period for this service.', self._ManageServiceOptionsUpdatePeriod, service_key )
+                        
+                    
+                    if can_overrule_services and service_type == HC.SERVER_ADMIN:
                         
                         ClientGUIMenus.AppendSeparator( submenu )
                         
@@ -5466,6 +5740,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             report_modes = QW.QMenu( debug )
             
             ClientGUIMenus.AppendMenuCheckItem( report_modes, 'callto report mode', 'Report whenever the thread pool is given a task.', HG.callto_report_mode, self._SwitchBoolean, 'callto_report_mode' )
+            ClientGUIMenus.AppendMenuCheckItem( report_modes, 'cache report mode', 'Have the image and thumb caches report their operation.', HG.cache_report_mode, self._SwitchBoolean, 'cache_report_mode' )
             ClientGUIMenus.AppendMenuCheckItem( report_modes, 'daemon report mode', 'Have the daemons report whenever they fire their jobs.', HG.daemon_report_mode, self._SwitchBoolean, 'daemon_report_mode' )
             ClientGUIMenus.AppendMenuCheckItem( report_modes, 'db report mode', 'Have the db report query information, where supported.', HG.db_report_mode, self._SwitchBoolean, 'db_report_mode' )
             ClientGUIMenus.AppendMenuCheckItem( report_modes, 'file import report mode', 'Have the db and file manager report file import progress.', HG.file_import_report_mode, self._SwitchBoolean, 'file_import_report_mode' )
@@ -5484,15 +5759,18 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             gui_actions = QW.QMenu( debug )
             
+            default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
+            
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make some popups', 'Throw some varied popups at the message manager, just to check it is working.', self._DebugMakeSomePopups )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make a long text popup', 'Make a popup with text that will grow in size.', self._DebugLongTextPopup )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make a popup in five seconds', 'Throw a delayed popup at the message manager, giving you time to minimise or otherwise alter the client before it arrives.', self._controller.CallLater, 5, HydrusData.ShowText, 'This is a delayed popup message.' )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make a modal popup in five seconds', 'Throw up a delayed modal popup to test with. It will stay alive for five seconds.', self._DebugMakeDelayedModalPopup, True )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make a non-cancellable modal popup in five seconds', 'Throw up a delayed modal popup to test with. It will stay alive for five seconds.', self._DebugMakeDelayedModalPopup, False )
-            ClientGUIMenus.AppendMenuItem( gui_actions, 'make a new page in five seconds', 'Throw a delayed page at the main notebook, giving you time to minimise or otherwise alter the client before it arrives.', self._controller.CallLater, 5, self._controller.pub, 'new_page_query', CC.LOCAL_FILE_SERVICE_KEY )
+            ClientGUIMenus.AppendMenuItem( gui_actions, 'make a new page in five seconds', 'Throw a delayed page at the main notebook, giving you time to minimise or otherwise alter the client before it arrives.', self._controller.CallLater, 5, self._controller.pub, 'new_page_query', default_local_file_service_key )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'refresh pages menu in five seconds', 'Delayed refresh the pages menu, giving you time to minimise or otherwise alter the client before it arrives.', self._controller.CallLater, 5, self._menu_updater_pages.update )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'publish some sub files in five seconds', 'Publish some files like a subscription would.', self._controller.CallLater, 5, lambda: HG.client_controller.pub( 'imported_files_to_page', [ HydrusData.GenerateKey() for i in range( 5 ) ], 'example sub files' ) )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'make a parentless text ctrl dialog', 'Make a parentless text control in a dialog to test some character event catching.', self._DebugMakeParentlessTextCtrl )
+            ClientGUIMenus.AppendMenuItem( gui_actions, 'reset multi-column list settings to default', 'Reset all multi-column list widths and other display settings to default.', self._DebugResetColumnListManager )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'force a main gui layout now', 'Tell the gui to relayout--useful to test some gui bootup layout issues.', self.adjustSize )
             ClientGUIMenus.AppendMenuItem( gui_actions, 'save \'last session\' gui session', 'Make an immediate save of the \'last session\' gui session. Mostly for testing crashes, where last session is not saved correctly.', self.ProposeSaveGUISession, 'last session' )
             
@@ -5814,12 +6092,18 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         
         petition_resolvable_repositories = [ repository for repository in repositories if True in ( repository.HasPermission( content_type, action ) for ( content_type, action ) in petition_permissions ) ]
         
-        ClientGUIMenus.AppendMenuItem( search_menu, 'my files', 'Open a new search tab for your files.', self._notebook.NewPageQuery, CC.LOCAL_FILE_SERVICE_KEY, on_deepest_notebook=True )
-        ClientGUIMenus.AppendMenuItem( search_menu, 'trash', 'Open a new search tab for your recently deleted files.', self._notebook.NewPageQuery, CC.TRASH_SERVICE_KEY, on_deepest_notebook=True )
+        local_file_services = [ service for service in services if service.GetServiceType() == HC.LOCAL_FILE_DOMAIN and service.GetServiceKey() != CC.LOCAL_UPDATE_SERVICE_KEY ]
+        
+        for service in local_file_services:
+            
+            ClientGUIMenus.AppendMenuItem( search_menu, service.GetName(), 'Open a new search tab.', self._notebook.NewPageQuery, service.GetServiceKey(), on_deepest_notebook = True )
+            
+        
+        ClientGUIMenus.AppendMenuItem( search_menu, 'trash', 'Open a new search tab for your recently deleted files.', self._notebook.NewPageQuery, CC.TRASH_SERVICE_KEY, on_deepest_notebook = True )
         
         for service in file_repositories:
             
-            ClientGUIMenus.AppendMenuItem( search_menu, service.GetName(), 'Open a new search tab for ' + service.GetName() + '.', self._notebook.NewPageQuery, service.GetServiceKey(), on_deepest_notebook=True )
+            ClientGUIMenus.AppendMenuItem( search_menu, service.GetName(), 'Open a new search tab for ' + service.GetName() + '.', self._notebook.NewPageQuery, service.GetServiceKey(), on_deepest_notebook = True )
             
         
         ClientGUIMenus.AppendMenu( menu, search_menu, 'new search page' )
@@ -5832,7 +6116,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             for service in petition_resolvable_repositories:
                 
-                ClientGUIMenus.AppendMenuItem( petition_menu, service.GetName(), 'Open a new petition page for ' + service.GetName() + '.', self._notebook.NewPagePetitions, service.GetServiceKey(), on_deepest_notebook=True )
+                ClientGUIMenus.AppendMenuItem( petition_menu, service.GetName(), 'Open a new petition page for ' + service.GetName() + '.', self._notebook.NewPagePetitions, service.GetServiceKey(), on_deepest_notebook = True )
                 
             
             ClientGUIMenus.AppendMenu( menu, petition_menu, 'new petition page' )

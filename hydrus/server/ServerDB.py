@@ -83,8 +83,6 @@ class DB( HydrusDB.HydrusDB ):
     
     READ_WRITE_ACTIONS = [ 'access_key', 'immediate_content_update', 'registration_keys' ]
     
-    TRANSACTION_COMMIT_PERIOD = 120
-    
     def __init__( self, controller, db_dir, db_name ):
         
         self._files_dir = os.path.join( db_dir, 'server_files' )
@@ -395,7 +393,7 @@ class DB( HydrusDB.HydrusDB ):
         
         admin_service = HydrusNetwork.GenerateService( HC.SERVER_ADMIN_KEY, HC.SERVER_ADMIN, 'server admin', HC.DEFAULT_SERVER_ADMIN_PORT )
         
-        self._AddService( admin_service ) # this sets up the admin account and a registration key by itself
+        self._AddService( admin_service ) # this sets up the admin account and a registration token by itself
         
     
     def _DeleteOrphans( self ):
@@ -492,7 +490,7 @@ class DB( HydrusDB.HydrusDB ):
         
         service_id = self._GetServiceId( service_key )
         
-        # we generate a new access_key every time this is requested so that no one with access to the registration key can peek at the access_key before the legit user fetches it for real
+        # we generate a new access_key every time this is requested so that no one with access to the registration token can peek at the access_key before the legit user fetches it for real
         # the reg_key is deleted when the last-requested access_key is used to create a session, which calls getaccountkeyfromaccesskey
         
         registration_key_sha256 = hashlib.sha256( registration_key ).digest()
@@ -501,7 +499,7 @@ class DB( HydrusDB.HydrusDB ):
         
         if result is None:
             
-            raise HydrusExceptions.InsufficientCredentialsException( 'The service could not find that registration key in its database.' )
+            raise HydrusExceptions.InsufficientCredentialsException( 'The service could not find that registration token in its database.' )
             
         
         new_access_key = os.urandom( HC.HYDRUS_KEY_LENGTH )
@@ -700,7 +698,7 @@ class DB( HydrusDB.HydrusDB ):
         
         if result is None:
             
-            raise HydrusExceptions.InsufficientCredentialsException( 'The service could not find that account key in its database.' )
+            raise HydrusExceptions.InsufficientCredentialsException( 'The service could not find that account id in its database.' )
             
         
         ( account_id, ) = result
@@ -1574,12 +1572,6 @@ class DB( HydrusDB.HydrusDB ):
         
         self._c.execute( 'INSERT OR IGNORE INTO ' + current_tag_parents_table_name + ' ( child_service_tag_id, parent_service_tag_id, account_id, parent_timestamp ) VALUES ( ?, ?, ?, ? );', ( child_service_tag_id, parent_service_tag_id, account_id, timestamp ) )
         
-        child_master_hash_ids = self._RepositoryGetCurrentMappingsMasterHashIds( service_id, child_service_tag_id )
-        
-        overwrite_deleted = False
-        
-        self._RepositoryAddMappings( service_id, account_id, parent_master_tag_id, child_master_hash_ids, overwrite_deleted, timestamp )
-        
     
     def _RepositoryAddTagSibling( self, service_id, account_id, bad_master_tag_id, good_master_tag_id, overwrite_deleted, timestamp ):
         
@@ -2068,17 +2060,6 @@ class DB( HydrusDB.HydrusDB ):
         ( count, ) = self._c.execute( 'SELECT COUNT( * ) FROM ' + current_mappings_table_name + ' WHERE service_tag_id = ?;', ( service_tag_id, ) ).fetchone()
         
         return count
-        
-    
-    def _RepositoryGetCurrentMappingsMasterHashIds( self, service_id, service_tag_id ):
-        
-        ( hash_id_map_table_name, tag_id_map_table_name ) = GenerateRepositoryMasterMapTableNames( service_id )
-        
-        ( current_mappings_table_name, deleted_mappings_table_name, pending_mappings_table_name, petitioned_mappings_table_name ) = GenerateRepositoryMappingsTableNames( service_id )
-        
-        master_hash_ids = [ master_hash_id for ( master_hash_id, ) in self._c.execute( 'SELECT master_hash_id FROM ' + hash_id_map_table_name + ' NATURAL JOIN ' + current_mappings_table_name + ' WHERE service_tag_id = ?;', ( service_tag_id, ) ) ]
-        
-        return master_hash_ids
         
     
     def _RepositoryGetFilesInfoFilesTableJoin( self, service_id, content_status ):

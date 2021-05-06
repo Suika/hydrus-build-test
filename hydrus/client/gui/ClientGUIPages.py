@@ -16,7 +16,6 @@ from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientSearch
 from hydrus.client import ClientThreading
 from hydrus.client.gui import ClientGUIAsync
-from hydrus.client.gui import ClientGUICanvas
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
@@ -26,6 +25,7 @@ from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIResults
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.canvas import ClientGUICanvas
 
 RESERVED_SESSION_NAMES = { '', 'just a blank page', 'last session', 'exit session' }
 
@@ -435,7 +435,9 @@ class Page( QW.QSplitter ):
         self._preview_panel.setFrameStyle( QW.QFrame.Panel | QW.QFrame.Sunken )
         self._preview_panel.setLineWidth( 2 )
         
-        self._preview_canvas = ClientGUICanvas.CanvasPanel( self._preview_panel, self._page_key )
+        self._preview_canvas = ClientGUICanvas.CanvasPanel( self._preview_panel, self._page_key, self._management_controller.GetKey( 'file_service' ) )
+        
+        self._management_panel.fileServiceChanged.connect( self._preview_canvas.SetFileServiceKey )
         
         self._media_panel = self._management_panel.GetDefaultEmptyMediaPanel()
         
@@ -851,7 +853,10 @@ class Page( QW.QSplitter ):
         
         def qt_code_status( status ):
             
-            self._SetPrettyStatus( status )
+            if not self._initialised:
+                
+                self._SetPrettyStatus( status )
+                
             
         
         controller = self._controller
@@ -882,6 +887,8 @@ class Page( QW.QSplitter ):
             
         
         def publish_callable( media_results ):
+            
+            self._SetPrettyStatus( '' )
             
             if self._management_controller.IsImporter():
                 

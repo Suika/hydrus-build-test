@@ -21,6 +21,7 @@ from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusThreading
 from hydrus.core import HydrusVideoHandling
+from hydrus.core.networking import HydrusNetwork
 from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientAPI
@@ -1065,7 +1066,8 @@ class Controller( HydrusController.HydrusController ):
         self.frame_splash_status.SetSubtext( 'image caches' )
         
         # careful: outside of qt since they don't need qt for init, seems ok _for now_
-        self._caches[ 'images' ] = ClientCaches.RenderedImageCache( self )
+        self._caches[ 'images' ] = ClientCaches.ImageRendererCache( self )
+        self._caches[ 'image_tiles' ] = ClientCaches.ImageTileCache( self )
         self._caches[ 'thumbnail' ] = ClientCaches.ThumbnailCache( self )
         self.bitmap_manager = ClientManagers.BitmapManager( self )
         
@@ -1184,9 +1186,10 @@ class Controller( HydrusController.HydrusController ):
         job = self.CallRepeating( 5.0, 3600.0, self.SynchroniseAccounts )
         job.ShouldDelayOnWakeup( True )
         job.WakeOnPubSub( 'notify_unknown_accounts' )
+        job.WakeOnPubSub( 'notify_new_permissions' )
         self._daemon_jobs[ 'synchronise_accounts' ] = job
         
-        job = self.CallRepeating( 5.0, 3600.0 * 4, self.SynchroniseRepositories )
+        job = self.CallRepeating( 5.0, HydrusNetwork.UPDATE_CHECKING_PERIOD, self.SynchroniseRepositories )
         job.ShouldDelayOnWakeup( True )
         job.WakeOnPubSub( 'notify_restart_repo_sync' )
         job.WakeOnPubSub( 'notify_new_permissions' )
@@ -2066,6 +2069,7 @@ class Controller( HydrusController.HydrusController ):
             
             def CopyToClipboard():
                 
+                # this is faster than qpixmap, which converts to a qimage anyway
                 qt_image = image_renderer.GetQtImage().copy()
                 
                 QW.QApplication.clipboard().setImage( qt_image )

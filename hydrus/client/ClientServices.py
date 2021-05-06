@@ -2124,7 +2124,10 @@ class ServiceRepository( ServiceRestricted ):
         
         with self._lock:
             
+            self._next_account_sync = 1
             self._do_a_full_metadata_resync = True
+            
+            self._metadata.UpdateASAP()
             
             self._SetDirty()
             
@@ -2158,11 +2161,25 @@ class ServiceRepository( ServiceRestricted ):
             
         
     
-    def GetUpdateInfo( self ):
+    def GetUpdatePeriod( self ) -> int:
         
         with self._lock:
             
-            return self._metadata.GetUpdateInfo()
+            if 'update_period' in self._service_options:
+                
+                update_period = self._service_options[ 'update_period' ]
+                
+                if not isinstance( update_period, int ):
+                    
+                    raise HydrusExceptions.DataMissing( 'This service has a bad update period! Try refreshing your account!' )
+                    
+                
+                return update_period
+                
+            else:
+                
+                raise HydrusExceptions.DataMissing( 'This service does not seem to have an update period! Try refreshing your account!' )
+                
             
         
     
@@ -3135,6 +3152,19 @@ class ServicesManager( object ):
             
         
     
+    def GetDefaultLocalFileServiceKey( self ) -> bytes:
+        
+        return CC.LOCAL_FILE_SERVICE_KEY
+        
+    
+    def GetLocalMediaFileServices( self ):
+        
+        with self._lock:
+            
+            return [ service for service in self._services_sorted if service.GetServiceType() == HC.LOCAL_FILE_DOMAIN and service.GetServiceKey() != CC.LOCAL_UPDATE_SERVICE_KEY ]
+            
+        
+    
     def GetName( self, service_key: bytes ):
         
         with self._lock:
@@ -3142,6 +3172,14 @@ class ServicesManager( object ):
             service = self._GetService( service_key )
             
             return service.GetName()
+            
+        
+    
+    def GetRemoteFileServiceKeys( self ):
+        
+        with self._lock:
+            
+            return { service_key for ( service_key, service ) in self._keys_to_services.items() if service.GetServiceType() in HC.REMOTE_FILE_SERVICES }
             
         
     

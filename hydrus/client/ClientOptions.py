@@ -149,6 +149,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'maintain_similar_files_duplicate_pairs_during_idle' ] = False
         
         self._dictionary[ 'booleans' ][ 'show_namespaces' ] = True
+        self._dictionary[ 'booleans' ][ 'replace_tag_underscores_with_spaces' ] = False
         
         self._dictionary[ 'booleans' ][ 'verify_regular_https' ] = True
         
@@ -311,7 +312,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         
         self._dictionary[ 'integers' ][ 'wake_delay_period' ] = 15
         
-        from hydrus.client.gui import ClientGUICanvas
+        from hydrus.client.gui.canvas import ClientGUICanvas
         
         self._dictionary[ 'integers' ][ 'media_viewer_zoom_center' ] = ClientGUICanvas.ZOOM_CENTERPOINT_VIEWER_CENTER
         
@@ -347,8 +348,15 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'integers' ][ 'duplicate_comparison_score_more_tags' ] = 8
         self._dictionary[ 'integers' ][ 'duplicate_comparison_score_older' ] = 4
         
+        self._dictionary[ 'integers' ][ 'image_tile_cache_size' ] = 1024 * 1024 * 256
+        
         self._dictionary[ 'integers' ][ 'thumbnail_cache_timeout' ] = 86400
         self._dictionary[ 'integers' ][ 'image_cache_timeout' ] = 600
+        self._dictionary[ 'integers' ][ 'image_tile_cache_timeout' ] = 300
+        
+        self._dictionary[ 'integers' ][ 'media_viewer_prefetch_delay_base_ms' ] = 100
+        self._dictionary[ 'integers' ][ 'media_viewer_prefetch_num_previous' ] = 2
+        self._dictionary[ 'integers' ][ 'media_viewer_prefetch_num_next' ] = 3
         
         self._dictionary[ 'integers' ][ 'thumbnail_border' ] = 1
         self._dictionary[ 'integers' ][ 'thumbnail_margin' ] = 2

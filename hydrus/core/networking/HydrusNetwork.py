@@ -10,6 +10,10 @@ from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core.networking import HydrusNetworking
 
+UPDATE_CHECKING_PERIOD = 240
+MIN_UPDATE_PERIOD = 600
+MAX_UPDATE_PERIOD = 100000 * 100 # three months or so jej
+
 def GenerateDefaultServiceDictionary( service_type ):
     
     dictionary = HydrusSerialisable.SerialisableDictionary()
@@ -109,6 +113,7 @@ def GetPossiblePermissions( service_type ):
     
     permissions.append( ( HC.CONTENT_TYPE_ACCOUNTS, [ None, HC.PERMISSION_ACTION_CREATE, HC.PERMISSION_ACTION_MODERATE ] ) )
     permissions.append( ( HC.CONTENT_TYPE_ACCOUNT_TYPES, [ None, HC.PERMISSION_ACTION_MODERATE ] ) )
+    permissions.append( ( HC.CONTENT_TYPE_OPTIONS, [ None, HC.PERMISSION_ACTION_MODERATE ] ) )
     
     if service_type == HC.FILE_REPOSITORY:
         
@@ -468,6 +473,14 @@ class Account( object ):
             
         
     
+    def IsUnknown( self ):
+        
+        with self._lock:
+            
+            return self._created == 0
+            
+        
+    
     def ReportDataUsed( self, num_bytes ):
         
         with self._lock:
@@ -733,7 +746,7 @@ class AccountIdentifier( HydrusSerialisable.SerialisableBase ):
         
         if not self.HasAccountKey():
             
-            raise Exception( 'This Account Identifier does not have an account key!' )
+            raise Exception( 'This Account Identifier does not have an account id!' )
             
         
         return self._data
@@ -770,7 +783,7 @@ class AccountType( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_ACCOUNT_TYPE
     SERIALISABLE_NAME = 'Account Type'
-    SERIALISABLE_VERSION = 1
+    SERIALISABLE_VERSION = 2
     
     def __init__(
         self,
@@ -852,6 +865,27 @@ class AccountType( HydrusSerialisable.SerialisableBase ):
         self._auto_creation_history = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_auto_creation_history )
         
     
+    def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
+        
+        if version == 1:
+            
+            ( serialisable_account_type_key, title, serialisable_permissions, serialisable_bandwidth_rules, auto_creation_velocity, serialisable_auto_creation_history ) = old_serialisable_info
+            
+            permissions = dict( serialisable_permissions )
+            
+            # admins can do options
+            if HC.CONTENT_TYPE_ACCOUNT_TYPES in permissions and permissions[ HC.CONTENT_TYPE_ACCOUNT_TYPES ] == HC.PERMISSION_ACTION_MODERATE:
+                
+                permissions[ HC.CONTENT_TYPE_OPTIONS ] = HC.PERMISSION_ACTION_MODERATE
+                
+            
+            serialisable_permissions = list( permissions.items() )
+            
+            new_serialisable_info = ( serialisable_account_type_key, title, serialisable_permissions, serialisable_bandwidth_rules, auto_creation_velocity, serialisable_auto_creation_history )
+            
+            return ( 2, new_serialisable_info )
+            
+        
     def BandwidthOK( self, bandwidth_tracker ):
         
         return self._bandwidth_rules.CanStartRequest( bandwidth_tracker )
@@ -964,6 +998,7 @@ class AccountType( HydrusSerialisable.SerialisableBase ):
         
         permissions[ HC.CONTENT_TYPE_ACCOUNTS ] = HC.PERMISSION_ACTION_MODERATE
         permissions[ HC.CONTENT_TYPE_ACCOUNT_TYPES ] = HC.PERMISSION_ACTION_MODERATE
+        permissions[ HC.CONTENT_TYPE_OPTIONS ] = HC.PERMISSION_ACTION_MODERATE
         
         if service_type in HC.REPOSITORIES:
             
@@ -1741,8 +1776,6 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
     SERIALISABLE_NAME = 'Metadata'
     SERIALISABLE_VERSION = 1
     
-    CLIENT_DELAY = 20 * 60
-    
     def __init__( self, metadata = None, next_update_due = None ):
         
         if metadata is None:
@@ -1766,6 +1799,24 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
         
         self._update_hashes = set()
         
+        self._biggest_end = self._CalculateBiggestEnd()
+        
+    
+    def _CalculateBiggestEnd( self ):
+        
+        if len( self._metadata ) == 0:
+            
+            return None
+            
+        else:
+            
+            biggest_index = max( self._metadata.keys() )
+            
+            ( update_hashes, begin, end ) = self._GetUpdate( biggest_index )
+            
+            return end
+            
+        
     
     def _GetNextUpdateDueTime( self, from_client = False ):
         
@@ -1773,7 +1824,7 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
         
         if from_client:
             
-            delay = self.CLIENT_DELAY
+            delay = UPDATE_CHECKING_PERIOD * 2
             
         
         return self._next_update_due + delay
@@ -1818,6 +1869,8 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             self._update_hashes.update( update_hashes )
             
         
+        self._biggest_end = self._CalculateBiggestEnd()
+        
     
     def AppendUpdate( self, update_hashes, begin, end, next_update_due ):
         
@@ -1830,6 +1883,23 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             self._update_hashes.update( update_hashes )
             
             self._next_update_due = next_update_due
+            
+            self._biggest_end = end
+            
+        
+    
+    def CalculateNewNextUpdateDue( self, update_period ):
+        
+        with self._lock:
+            
+            if self._biggest_end is None:
+                
+                self._next_update_due = 0
+                
+            else:
+                
+                self._next_update_due = self._biggest_end + update_period
+                
             
         
     
@@ -1865,19 +1935,13 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            keys = list( self._metadata.keys() )
-            
-            if len( keys ) == 0:
+            if self._biggest_end is None:
                 
                 return HydrusData.GetNow()
                 
             else:
                 
-                largest_update_index = max( keys )
-                
-                ( update_hashes, begin, end ) = self._GetUpdate( largest_update_index )
-                
-                return end + 1
+                return self._biggest_end + 1
                 
             
         
@@ -1890,20 +1954,24 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
                 
                 return 'have not yet synced metadata'
                 
+            elif self._biggest_end is None:
+                
+                return 'the metadata appears to be uninitialised'
+                
             else:
                 
                 update_due = self._GetNextUpdateDueTime( from_client )
                 
                 if HydrusData.TimeHasPassed( update_due ):
                     
-                    s = 'imminently'
+                    s = 'checking for updates imminently'
                     
                 else:
                     
-                    s = HydrusData.TimestampToPrettyTimeDelta( update_due )
+                    s = 'checking for updates {}'.format( HydrusData.TimestampToPrettyTimeDelta( update_due ) )
                     
                 
-                return 'next update due ' + s
+                return 'metadata synced up to {}, {}'.format( HydrusData.TimestampToPrettyTimeDelta( self._biggest_end ), s )
                 
             
         
@@ -1982,45 +2050,6 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def GetUpdateInfo( self, from_client = False ):
-        
-        with self._lock:
-            
-            num_update_hashes = sum( ( len( update_hashes ) for ( update_hashes, begin, end ) in list(self._metadata.values()) ) )
-            
-            if len( self._metadata ) == 0:
-                
-                status = 'have not yet synchronised'
-                
-            else:
-                
-                biggest_end = max( ( end for ( update_hashes, begin, end ) in list(self._metadata.values()) ) )
-                
-                delay = 0
-                
-                if from_client:
-                    
-                    delay = self.CLIENT_DELAY
-                    
-                
-                next_update_time = self._next_update_due + delay
-                
-                if HydrusData.TimeHasPassed( next_update_time ):
-                    
-                    s = 'imminently'
-                    
-                else:
-                    
-                    s = HydrusData.TimestampToPrettyTimeDelta( next_update_time )
-                    
-                
-                status = 'metadata synchronised up to ' + HydrusData.TimestampToPrettyTimeDelta( biggest_end ) + ', next update due ' + s
-                
-            
-            return ( num_update_hashes, status )
-            
-        
-    
     def HasDoneInitialSync( self ):
         
         with self._lock:
@@ -2037,6 +2066,15 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def UpdateASAP( self ):
+        
+        with self._lock:
+            
+            # not 0, that's reserved
+            self._next_update_due = 1
+            
+        
+    
     def UpdateDue( self, from_client = False ):
         
         with self._lock:
@@ -2047,13 +2085,21 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def UpdateFromSlice( self, metadata_slice ):
+    def UpdateFromSlice( self, metadata_slice: "Metadata" ):
         
         with self._lock:
             
             self._metadata.update( metadata_slice._metadata )
             
-            self._next_update_due = metadata_slice._next_update_due
+            new_next_update_due = metadata_slice._next_update_due
+            
+            if HydrusData.TimeHasPassed( new_next_update_due ):
+                
+                new_next_update_due = HydrusData.GetNow() + 100000
+                
+            
+            self._next_update_due = new_next_update_due
+            self._biggest_end = self._CalculateBiggestEnd()
             
         
     
@@ -2469,11 +2515,33 @@ class ServerServiceRepository( ServerServiceRestricted ):
             
         
     
+    def GetUpdatePeriod( self ) -> int:
+        
+        with self._lock:
+            
+            return self._service_options[ 'update_period' ]
+            
+        
+    
     def HasUpdateHash( self, update_hash ):
         
         with self._lock:
             
             return self._metadata.HasUpdateHash( update_hash )
+            
+        
+    
+    def SetUpdatePeriod( self, update_period: int ):
+        
+        with self._lock:
+            
+            self._service_options[ 'update_period' ] = update_period
+            
+            self._metadata.CalculateNewNextUpdateDue( update_period )
+            
+            self._SetDirty()
+            
+            HG.server_controller.pub( 'notify_new_repo_sync' )
             
         
     

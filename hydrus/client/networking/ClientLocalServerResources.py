@@ -203,16 +203,33 @@ def ParseClientAPISearchPredicates( request ):
     
     request.client_api_permissions.CheckCanSearchTags( tags )
     
+    search_tags = [ ( True, tag ) for tag in tags ]
+    search_tags.extend( ( ( False, tag ) for tag in negated_tags ) )
+    
     predicates = []
     
-    for tag in negated_tags:
+    for ( inclusive, tag ) in search_tags:
         
-        predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = tag, inclusive = False ) )
+        ( namespace, subtag ) = HydrusTags.SplitTag( tag )
         
-    
-    for tag in tags:
+        if '*' in tag:
+            
+            if subtag == '*':
+                
+                tag = namespace
+                predicate_type = ClientSearch.PREDICATE_TYPE_NAMESPACE
+                
+            else:
+                
+                predicate_type = ClientSearch.PREDICATE_TYPE_WILDCARD
+                
+            
+        else:
+            
+            predicate_type = ClientSearch.PREDICATE_TYPE_TAG
+            
         
-        predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = tag ) )
+        predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = tag, inclusive = inclusive ) )
         
     
     if system_inbox:
@@ -958,7 +975,7 @@ class HydrusResourceClientAPIRestrictedAddFilesUndeleteFiles( HydrusResourceClie
         
         content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes )
         
-        service_keys_to_content_updates = { CC.TRASH_SERVICE_KEY : [ content_update ] }
+        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ content_update ] }
         
         if len( service_keys_to_content_updates ) > 0:
             
@@ -1887,6 +1904,8 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetCookies( HydrusResourceCl
                 ClientNetworkingDomain.AddCookieToSession( session, name, value, domain, path, expires )
                 
             
+            HG.client_controller.network_engine.session_manager.SetSessionDirty( network_context )
+            
         
         if HG.client_controller.new_options.GetBoolean( 'notify_client_api_cookies' ) and len( domains_cleared ) + len( domains_set ) > 0:
             
@@ -1915,8 +1934,6 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetCookies( HydrusResourceCl
             
             HG.client_controller.pub( 'message', job_key )
             
-        
-        HG.client_controller.network_engine.session_manager.SetSessionDirty( network_context )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
