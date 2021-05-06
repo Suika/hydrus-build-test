@@ -18,9 +18,8 @@ jobs:
       - name: I'm not dumb, am I
         run: |
             ls ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }}
-            ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }}
-            which ffmpeg
-            mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} .
+            mkdir bin
+            mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} bin/
   build-macos:
     runs-on: macos-latest
     if: false
