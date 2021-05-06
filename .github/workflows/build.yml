@@ -7,7 +7,7 @@ on:
     branches: master
 
 jobs:
-  build-macos:
+  build-macos2:
     runs-on: macos-latest
     if: false
     steps:
@@ -20,6 +20,7 @@ jobs:
         run: |
             ls ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }}
             ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }}
+            which ffmpeg
             mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} .
   build-macos:
     runs-on: macos-latest
