@@ -12,8 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: FedericoCarboni/setup-ffmpeg@v1
+        id: setup_ffmpeg
         with:
-          path: bin/
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rs/toolchain@v1
         with:
@@ -65,6 +65,7 @@ jobs:
           ln -s /Applications ./Applications
           cp install/static/build_files/running_from_app "install/running_from_app"
           mv install/* "Hydrus Network.app/Contents/MacOS/"
+          mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} "Hydrus Network.app/Contents/MacOS/bin/"
           rm -rf install
           cd $GITHUB_WORKSPACE
           temp_dmg="$(mktemp).dmg"
