@@ -64,8 +64,8 @@ jobs:
           cp install/static/build_files/ReadMeFirst.rtf ./ReadMeFirst.rtf
           ln -s /Applications ./Applications
           cp install/static/build_files/running_from_app "install/running_from_app"
+          mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} install/bin/
           mv install/* "Hydrus Network.app/Contents/MacOS/"
-          mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} "Hydrus Network.app/Contents/MacOS/bin/"
           rm -rf install
           cd $GITHUB_WORKSPACE
           temp_dmg="$(mktemp).dmg"
