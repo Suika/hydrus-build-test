@@ -28,7 +28,7 @@ jobs:
       - name: Build Hydrus
         run: |
           cd $GITHUB_WORKSPACE
-          mv ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} bin/
+          cp ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} bin/
           cp static/build_files/pyoxidizer.bzl pyoxidizer.bzl
           basename $(rustc --print sysroot) | sed -e "s/^stable-//" > triple.txt
           pyoxidizer build --release
