@@ -124,7 +124,7 @@ jobs:
           pyinstaller client.spec
       - name: Remove Files
         run: |
-            while read line; do rm hydrus/${line} ; done < hydrus/static/build_files/linux/files_to_delete.txt
+            while read line; do rm -f hydrus/${line} ; done < hydrus/static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
