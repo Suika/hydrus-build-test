@@ -28,7 +28,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('Cargo.toml') }}
             ${{ runner.os }}-cargo
-
       - name: Cache Cargo build
         uses: actions/cache@v2
         with:
