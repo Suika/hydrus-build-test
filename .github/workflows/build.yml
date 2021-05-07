@@ -29,7 +29,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           cp ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} bin/
-          cp static/build_files/pyoxidizer.bzl pyoxidizer.bzl
+          cp static/build_files/macos/pyoxidizer.bzl pyoxidizer.bzl
           basename $(rustc --print sysroot) | sed -e "s/^stable-//" > triple.txt
           pyoxidizer build --release
           cd build/$(head -n 1 triple.txt)/release
@@ -62,9 +62,9 @@ jobs:
             <string>True</string></dict>
           </plist>
           EOF
-          cp install/static/build_files/ReadMeFirst.rtf ./ReadMeFirst.rtf
+          cp install/static/build_files/macos/ReadMeFirst.rtf ./ReadMeFirst.rtf
           ln -s /Applications ./Applications
-          cp install/static/build_files/running_from_app "install/running_from_app"
+          cp install/static/build_files/macos/running_from_app "install/running_from_app"
           mv install/* "Hydrus Network.app/Contents/MacOS/"
           rm -rf install
           cd $GITHUB_WORKSPACE
@@ -78,9 +78,9 @@ jobs:
           path: HydrusNetwork.dmg
           if-no-files-found: error
           retention-days: 2
+
   build-ubuntu:
     runs-on: ubuntu-18.04
-    if: false
     steps:
       -
         name: Checkout
@@ -116,12 +116,15 @@ jobs:
         with:
           packages: pyinstaller
           requirements: hydrus/requirements.txt
-      - name: build with pyinstaller
+      - name: PyInstaller
         run: |
-          cp hydrus/docker/pyinstaller/client.spec client.spec
-          cp hydrus/docker/pyinstaller/server.spec server.spec
+          cp hydrus/static/build_files/linux/client.spec client.spec
+          cp hydrus/static/build_files/linux/server.spec server.spec
           pyinstaller server.spec
           pyinstaller client.spec
+      - name: Remove Files
+        run: |
+            while read line; do rm hydrus/${line} ; done < hydrus/static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
@@ -130,15 +133,16 @@ jobs:
 
   build-windows:
     runs-on: [windows-latest]
-    if: false
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v2
         with:
           path: hydrus
-      - 
-        name: Setup Python
+      - uses: FedericoCarboni/setup-ffmpeg@v1
+        id: setup_ffmpeg
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Python
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
@@ -149,8 +153,7 @@ jobs:
         with:
           path: Qt
           key: ${{ runner.os }}-QtCache
-      - 
-        name: Install Qt
+      - name: Install Qt
         uses: jurplel/install-qt-action@v2
         with:
           install-deps: true
@@ -164,14 +167,15 @@ jobs:
           requirements: hydrus\requirements.txt
       - name: build with pyinstaller
         run: |
-          move hydrus\docker\pyinstaller\client-win.spec client-win.spec
-          move hydrus\docker\pyinstaller\server-win.spec server-win.spec
+          move ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} hydrus\bin\
+          move hydrus\static\build_files\windows\client-win.spec client-win.spec
+          move hydrus\static\build_files\windows\server-win.spec server-win.spec
           pyinstaller server-win.spec
           pyinstaller client-win.spec
           dir -r
       - name: InnoSetup
         run: |
-          move hydrus\docker\InnoSetup.iss InnoSetup.iss
+          move hydrus\static\build_files\windows\InnoSetup.iss InnoSetup.iss
           ISCC.exe InnoSetup.iss
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
