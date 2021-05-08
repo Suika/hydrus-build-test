@@ -18,8 +18,14 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.2.0
+      - name: Cargo Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('Cargo.toml') }}
+            ${{ runner.os }}-cargo
       - name: Cargo Artifacts Cache
         uses: actions/cache@v2
         with:
