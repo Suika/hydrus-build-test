@@ -5,8 +5,7 @@ import cv2
 import os
 import glob
 cloudscraper_dir = os.path.dirname( cloudscraper.__file__ )
-cv2_dir = os.path.dirname( cv2.__file__ )
-cv2_ffmpeg_dll = glob.glob(cv2_dir+"/*.dll")[0]
+cv2_ffmpeg_dll = glob.glob(os.path.dirname( cv2.__file__ )+"/*.dll")[0]
 
 block_cipher = None
 

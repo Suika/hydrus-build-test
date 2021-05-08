@@ -48,6 +48,7 @@ jobs:
           cp hydrus/static/build_files/linux/server.spec server.spec
           pyinstaller server.spec
           pyinstaller client.spec
+          find . -type d -name "__pycache__" -delete
       - name: Remove Files
         run: |
             cd hydrus
