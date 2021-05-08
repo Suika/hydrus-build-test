@@ -114,7 +114,7 @@ jobs:
           pyinstaller client.spec
       - name: Remove Chonk
         run: |
-            find dist/client/ -type d -name "__pycache__" -exec rm -rfv "{}" \;
+            find dist/client/ -type f -name "*.pyc" -delete
             while read line; do rm -rv dist/client/${line} ; done < static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
