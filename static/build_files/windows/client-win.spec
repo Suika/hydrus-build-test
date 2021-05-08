@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import cloudscraper
-import cv
+import cv2
 import os
 import glob
 cloudscraper_dir = os.path.dirname( cloudscraper.__file__ )
