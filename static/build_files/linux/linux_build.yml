@@ -48,10 +48,10 @@ jobs:
           cp hydrus/static/build_files/linux/server.spec server.spec
           pyinstaller server.spec
           pyinstaller client.spec
-          find . -type d -name "__pycache__" -delete
-      - name: Remove Files
+      - name: Remove Chonk
         run: |
-            while read line; do rm dist/client/${line} ; done < static/build_files/linux/files_to_delete.txt
+            find dist/client/ -type d -name "__pycache__" -exec rm -rv "{}" \;
+            while read line; do rm -rv dist/client/${line} ; done < static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
