@@ -19,7 +19,7 @@ a = Analysis(['hydrus\\client.pyw'],
                ('hydrus\\help my client will not boot.txt', '.'),
                ('hydrus\\db', 'db')
              ],
-             hiddenimports=['hydrus\\server.py'],
+             hiddenimports=['hydrus\\server.py', 'cloudscraper'],
              hookspath=[],
              runtime_hooks=[],
              excludes=[],

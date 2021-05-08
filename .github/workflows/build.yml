@@ -50,10 +50,10 @@ jobs:
           mkdir -p "Hydrus Network.app/Contents/MacOS"
           mkdir -p "Hydrus Network.app/Contents/Resources"
           mkdir -p "Hydrus Network.app/Contents/Frameworks"
-          mv install/static/icon.icns                           "Hydrus Network.app/Contents/Resources/icon.icns"
-          cp install/static/build_files/macos/Info.plist        "Hydrus Network.app/Contents/Info.plist"
-          cp install/static/build_files/macos/ReadMeFirst.rtf   ./ReadMeFirst.rtf
-          cp install/static/build_files/macos/running_from_app  "install/running_from_app"
+          mv install/static/icon.icns "Hydrus Network.app/Contents/Resources/icon.icns"
+          cp install/static/build_files/macos/Info.plist "Hydrus Network.app/Contents/Info.plist"
+          cp install/static/build_files/macos/ReadMeFirst.rtf ./ReadMeFirst.rtf
+          cp install/static/build_files/macos/running_from_app "install/running_from_app"
           ln -s /Applications ./Applications
           mv install/* "Hydrus Network.app/Contents/MacOS/"
           rm -rf install
@@ -150,11 +150,15 @@ jobs:
           setup-python: 'false'
           modules: qtcharts qtwidgets qtgui qtcore
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
-      - name: Pip Installer
+      - name: PIP Installer
         uses: BSFishy/pip-action@v1
         with:
           packages: pyinstaller
           requirements: hydrus\requirements.txt
+      - name: PIP Windows Extras
+        uses: BSFishy/pip-action@v1
+        with:
+          requirements: hydrus\static\build_files\windows\requirements.txt
       - name: build with pyinstaller
         run: |
           move ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} hydrus\bin\
