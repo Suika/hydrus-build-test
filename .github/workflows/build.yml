@@ -112,9 +112,10 @@ jobs:
           cp hydrus/static/build_files/linux/server.spec server.spec
           pyinstaller server.spec
           pyinstaller client.spec
+          find . -type d -name "__pycache__" -delete
       - name: Remove Files
         run: |
-            while read line; do rm -vf hydrus/${line} ; done < hydrus/static/build_files/linux/files_to_delete.txt
+            while read line; do rm dist/client/${line} ; done < static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:

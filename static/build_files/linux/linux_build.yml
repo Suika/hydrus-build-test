@@ -51,8 +51,7 @@ jobs:
           find . -type d -name "__pycache__" -delete
       - name: Remove Files
         run: |
-            cd hydrus
-            while read line; do rm ${line} ; done < static/build_files/linux/files_to_delete.txt
+            while read line; do rm dist/client/${line} ; done < static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
