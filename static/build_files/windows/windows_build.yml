@@ -43,9 +43,14 @@ jobs:
         uses: BSFishy/pip-action@v1
         with:
           requirements: hydrus\static\build_files\windows\requirements.txt
+      - name: MPV dll
+        run: |
+          nuget.exe install mpv -OutputDirectory mpvlib
+          move mpvlib\*\bin\x64\mpv-1.dll hydrus\
       - name: build with pyinstaller
         run: |
           move ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} hydrus\bin\
+          move hydrus\static\build_files\windows\sqlite3.dll hydrus\
           move hydrus\static\build_files\windows\client-win.spec client-win.spec
           move hydrus\static\build_files\windows\server-win.spec server-win.spec
           pyinstaller server-win.spec

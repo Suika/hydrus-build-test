@@ -1,8 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import cloudscraper
+import cv
 import os
+import glob
 cloudscraper_dir = os.path.dirname( cloudscraper.__file__ )
+cv2_dir = os.path.dirname( cv2.__file__ )
+cv2_ffmpeg_dll = glob.glob(cv2_dir+"/*.dll")[0]
 
 block_cipher = None
 
@@ -22,7 +26,9 @@ a = Analysis(['hydrus\\client.pyw'],
                ('hydrus\\Readme.txt', '.'),
                ('hydrus\\help my client will not boot.txt', '.'),
                ('hydrus\\db', 'db'),
-               (cloudscraper_dir, 'cloudscraper')
+               ('hydrus', 'hydrus'),
+               (cloudscraper_dir, 'cloudscraper'),
+               (cv2_ffmpeg_dll, '.')
              ],
              hiddenimports=['hydrus\\server.py', 'cloudscraper'],
              hookspath=[],
