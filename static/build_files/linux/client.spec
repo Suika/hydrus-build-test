@@ -22,7 +22,7 @@ a = Analysis(['hydrus/client.py'],
                ('hydrus/Readme.txt', '.'),
                ('hydrus/help my client will not boot.txt', '.'),
                ('hydrus/db', 'db'),
-               ('hydrus', 'hydrus'),
+               ('hydrus/hydrus', 'hydrus'),
                (cloudscraper_dir, 'cloudscraper')
              ],
              hiddenimports=['hydrus/server.py'],

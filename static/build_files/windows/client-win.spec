@@ -25,7 +25,7 @@ a = Analysis(['hydrus\\client.pyw'],
                ('hydrus\\Readme.txt', '.'),
                ('hydrus\\help my client will not boot.txt', '.'),
                ('hydrus\\db', 'db'),
-               ('hydrus', 'hydrus'),
+               ('hydrus\\hydrus', 'hydrus'),
                (cloudscraper_dir, 'cloudscraper'),
                (cv2_ffmpeg_dll, '.')
              ],
