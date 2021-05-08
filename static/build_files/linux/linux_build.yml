@@ -51,7 +51,7 @@ jobs:
       - name: Remove Chonk
         run: |
             find dist/client/ -type f -name "*.pyc" -delete
-            while read line; do rm -rv dist/client/${line} ; done < hydrus/static/build_files/linux/files_to_delete.txt
+            while read line; do find dist/client/ -type f -name "${line}" -delete ; done < hydrus/static/build_files/linux/files_to_delete.txt
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
