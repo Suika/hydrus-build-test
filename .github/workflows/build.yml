@@ -121,7 +121,7 @@ jobs:
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: Hydrus Ubuntu LTS Extract
+          name: Ubuntu-Extract
           path: dist/client
           if-no-files-found: error
           retention-days: 2
