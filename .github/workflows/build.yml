@@ -162,7 +162,7 @@ jobs:
           requirements: hydrus\static\build_files\windows\requirements.txt
       - name: Download mpv-1.dll
         run: |
-          Invoke-WebRequest -Uri https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20210228-git-d1be8bb.7z -OutFile mpv-dev-x86_64.7z -UserAgent "[Microsoft.PowerShell.Commands.PSUserAgent]::FireFox"
+          Invoke-WebRequest -Uri "https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20210228-git-d1be8bb.7z" -OutFile mpv-dev-x86_64.7z -UserAgent [Microsoft.PowerShell.Commands.PSUserAgent]::FireFox
           7z x mpv-dev-x86_64.7z
           move mpv-1.dll hydrus\
       - name: build with pyinstaller
