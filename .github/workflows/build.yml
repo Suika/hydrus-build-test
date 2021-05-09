@@ -10,12 +10,15 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: FedericoCarboni/setup-ffmpeg@v1
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Setup FFMPEG
+        uses: FedericoCarboni/setup-ffmpeg@v1
         id: setup_ffmpeg
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rs/toolchain@v1
+      - name: Setup Rust Tollchain
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
       - name: Cargo Cache
@@ -44,6 +47,7 @@ jobs:
           cd $GITHUB_WORKSPACE
           cp ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} bin/
           cp static/build_files/macos/pyoxidizer.bzl pyoxidizer.bzl
+          cp static/build_files/linux/requirements.txt requirements.txt
           basename $(rustc --print sysroot) | sed -e "s/^stable-//" > triple.txt
           pyoxidizer build --release
           cd build/$(head -n 1 triple.txt)/release
@@ -106,7 +110,7 @@ jobs:
         with:
           packages: pyinstaller
           requirements: hydrus/static/build_files/linux/requirements.txt
-      - name: PyInstaller
+      - name: Build Hydrus
         run: |
           cp hydrus/static/build_files/linux/client.spec client.spec
           cp hydrus/static/build_files/linux/server.spec server.spec
@@ -121,6 +125,8 @@ jobs:
         with:
           name: Hydrus Ubuntu LTS Extract
           path: dist/client
+          if-no-files-found: error
+          retention-days: 2
 
   build-windows:
     runs-on: [windows-latest]
@@ -129,7 +135,8 @@ jobs:
         uses: actions/checkout@v2
         with:
           path: hydrus
-      - uses: FedericoCarboni/setup-ffmpeg@v1
+      - name: Setup FFMPEG
+        uses: FedericoCarboni/setup-ffmpeg@v1
         id: setup_ffmpeg
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -139,10 +146,10 @@ jobs:
           python-version: 3.8
           architecture: x64
       - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v2.1.4
+        id: cache_qt
+        uses: actions/cache@v1
         with:
-          path: Qt
+          path: ../Qt
           key: ${{ runner.os }}-QtCache
       - name: Install Qt
         uses: jurplel/install-qt-action@v2
@@ -150,28 +157,24 @@ jobs:
           install-deps: true
           setup-python: 'false'
           modules: qtcharts qtwidgets qtgui qtcore
-          cached: ${{ steps.cache-qt.outputs.cache-hit }}
-      - name: PIP Installer
+          cached: ${{ steps.cache_qt.outputs.cache-hit }}
+      - name: PIP Install Packages
         uses: BSFishy/pip-action@v1
         with:
           packages: pyinstaller
-          requirements: hydrus\requirements.txt
-      - name: PIP Windows Extras
-        uses: BSFishy/pip-action@v1
-        with:
           requirements: hydrus\static\build_files\windows\requirements.txt
-      - name: Download a file
+      - name: Download mpv-dev
         uses: carlosperate/download-file-action@v1.0.3
         id: download_mpv
         with:
             file-url: 'https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20210228-git-d1be8bb.7z'
             file-name: 'mpv-dev-x86_64.7z'
             location: '.'
-      - name: Download mpv-1.dll
+      - name: Process mpv-dev
         run: |
           7z x ${{ steps.download_mpv.outputs.file-path }}
           move mpv-1.dll hydrus\
-      - name: build with pyinstaller
+      - name: Build Hydrus
         run: |
           move ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} hydrus\bin\
           move hydrus\static\build_files\windows\sqlite3.dll hydrus\
@@ -187,12 +190,50 @@ jobs:
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: Windows-Extract
-          path: dist\Hydrus Network
-      - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2
-        with:
           name: Windows-Install
           path: dist\HydrusInstaller.exe
           if-no-files-found: error
           retention-days: 2
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Windows-Extract
+          path: dist\Hydrus Network
+          if-no-files-found: error
+          retention-days: 2
+
+  create-release:
+    name: Create Release Entry
+    runs-on: ubuntu-20.04
+    needs: [build-windows, build-ubuntu, build-macos]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Get All Artifacts
+        uses: actions/download-artifact@v2
+      - name: Extract version metadata
+        id: meta
+        run: |
+          echo "::set-output name=version::${GITHUB_REF##*/}"
+          echo "::set-output name=version_short::${GITHUB_REF##*/v}"
+      - name: Rename Files
+        run: |
+          mv MacOS-DMG/HydrusNetwork.dmg         Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.macOS.-.App.dmg
+          mv Windows-Install/HydrusInstaller.exe HydrusInstaller-${{ steps.meta.outputs.version_short }}.exe
+          mv Windows-Extract                     Windows-Extract-${{ steps.meta.outputs.version_short }}
+          mv Ubuntu-Extract                      Ubuntu-Extract-${{ steps.meta.outputs.version_short }}
+      - name: Compress Directories
+        run: |
+          zip -9 -r Windows-Extract-${{ steps.meta.outputs.version_short }}.zip Windows-Extract-${{ steps.meta.outputs.version_short }}
+          zip -9 -r Ubuntu-Extract-${{ steps.meta.outputs.version_short }}.zip  Ubuntu-Extract-${{ steps.meta.outputs.version_short }}
+      - name: Release new
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            HydrusInstaller-${{ steps.meta.outputs.version_short }}.exe
+            Windows-Extract-${{ steps.meta.outputs.version_short }}.zip
+            Ubuntu-Extract-${{ steps.meta.outputs.version_short }}.zip
+            Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.macOS.-.App.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

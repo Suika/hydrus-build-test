@@ -42,7 +42,7 @@ jobs:
         with:
           packages: pyinstaller
           requirements: hydrus/static/build_files/linux/requirements.txt
-      - name: PyInstaller
+      - name: Build Hydrus
         run: |
           cp hydrus/static/build_files/linux/client.spec client.spec
           cp hydrus/static/build_files/linux/server.spec server.spec
@@ -57,3 +57,5 @@ jobs:
         with:
           name: Hydrus Ubuntu LTS Extract
           path: dist/client
+          if-no-files-found: error
+          retention-days: 2
