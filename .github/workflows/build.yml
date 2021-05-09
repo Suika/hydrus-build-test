@@ -216,22 +216,23 @@ jobs:
           echo "::set-output name=version_short::${GITHUB_REF##*/v}"
       - name: Rename Files
         run: |
+          mkdir ubuntu windows
           mv MacOS-DMG/HydrusNetwork.dmg         Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.macOS.-.App.dmg
-          mv Windows-Install/HydrusInstaller.exe HydrusInstaller-${{ steps.meta.outputs.version_short }}.exe
-          mv Windows-Extract                     Windows-Extract-${{ steps.meta.outputs.version_short }}
-          mv Ubuntu-Extract                      Ubuntu-Extract-${{ steps.meta.outputs.version_short }}
+          mv Windows-Install/HydrusInstaller.exe Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.Windows.-.Installer.exe
+          mv Windows-Extract                     "windows/Hydrus Network"
+          mv Ubuntu-Extract                      "ubuntu/Hydrus Network"
       - name: Compress Directories
         run: |
-          zip -9 -r Windows-Extract-${{ steps.meta.outputs.version_short }}.zip Windows-Extract-${{ steps.meta.outputs.version_short }}
-          zip -9 -r Ubuntu-Extract-${{ steps.meta.outputs.version_short }}.zip  Ubuntu-Extract-${{ steps.meta.outputs.version_short }}
+          zip -9 -r Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.Windows.-.Extract.only.zip "windows/Hydrus Network"
+          tar -czvf Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.Linux.-.Executable.tar.gz  "ubuntu/Hydrus Network"
       - name: Release new
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            HydrusInstaller-${{ steps.meta.outputs.version_short }}.exe
-            Windows-Extract-${{ steps.meta.outputs.version_short }}.zip
-            Ubuntu-Extract-${{ steps.meta.outputs.version_short }}.zip
+            Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.Windows.-.Installer.exe
+            Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.Windows.-.Extract.only.zip
+            Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.Linux.-.Executable.tar.gz
             Hydrus.Network.${{ steps.meta.outputs.version_short }}.-.macOS.-.App.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

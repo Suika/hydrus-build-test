@@ -82,9 +82,10 @@ jobs:
           images: |
             ghcr.io/hydrusnetwork/hydrus
           tags: |
-            type=ref,event=tag
+            type=ref,event=tag,prefix=server-
+            type=raw,enable=true,prefix=,suffix=,value=server
           flavor: |
-            prefix=server-
+            latest=false
           labels: |
             org.opencontainers.image.title=Hydrus Network Server
             org.opencontainers.image.description=A personal booru-style media tagger that can import files and tags from your hard drive and popular websites.
