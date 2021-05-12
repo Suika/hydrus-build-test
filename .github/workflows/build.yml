@@ -9,7 +9,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.3.4
       - name: Setup FFMPEG
         uses: FedericoCarboni/setup-ffmpeg@v1
         id: setup_ffmpeg
@@ -76,7 +76,7 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.3.4
         with:
           path: hydrus
       - 
@@ -130,7 +130,7 @@ jobs:
     runs-on: [windows-latest]
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.3.4
         with:
           path: hydrus
       - name: Setup FFMPEG
@@ -206,7 +206,7 @@ jobs:
     needs: [build-windows, build-ubuntu, build-macos]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.3.4
       - name: Get All Artifacts
         uses: actions/download-artifact@v2
       - name: Extract version metadata
