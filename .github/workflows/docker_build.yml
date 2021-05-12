@@ -49,7 +49,7 @@ jobs:
       #    password: ${{ secrets.GHCR_TOKEN }}
       -
         name: Build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v2.4.0
         with:
           context: .
           push: false
@@ -115,7 +115,7 @@ jobs:
       #    password: ${{ secrets.GHCR_TOKEN }}
       -
         name: Build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v2.4.0
         with:
           context: .
           push: false
