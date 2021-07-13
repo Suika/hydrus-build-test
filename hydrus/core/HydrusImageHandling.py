@@ -239,9 +239,12 @@ def GenerateNumPyImage( path, mime, force_pil = False ):
     
     return numpy_image
     
-def GenerateNumPyImageFromPILImage( pil_image ):
+def GenerateNumPyImageFromPILImage( pil_image, dequantize = True ):
     
-    pil_image = Dequantize( pil_image )
+    if dequantize:
+        
+        pil_image = Dequantize( pil_image )
+        
     
     ( w, h ) = pil_image.size
     
@@ -394,7 +397,7 @@ def GenerateThumbnailBytesNumPy( numpy_image, mime ):
         return GenerateThumbnailBytesPIL( pil_image, mime )
         
     
-    ( im_y, im_x, depth ) = numpy_image.shape
+    ( im_height, im_width, depth ) = numpy_image.shape
     
     if depth == 4:
         

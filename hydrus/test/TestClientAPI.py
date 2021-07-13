@@ -23,11 +23,13 @@ from hydrus.client import ClientAPI
 from hydrus.client import ClientManagers
 from hydrus.client import ClientSearch
 from hydrus.client import ClientServices
+from hydrus.client.importing import ClientImportFiles
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
 from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientLocalServer
 from hydrus.client.networking import ClientLocalServerResources
+from hydrus.client.networking import ClientNetworkingContexts
 
 class TestClientAPI( unittest.TestCase ):
     
@@ -110,6 +112,7 @@ class TestClientAPI( unittest.TestCase ):
         response_json = json.loads( text )
         
         self.assertEqual( response_json[ 'version' ], HC.CLIENT_API_VERSION )
+        self.assertEqual( response_json[ 'hydrus_version' ], HC.SOFTWARE_VERSION )
         
         # /request_new_permissions
         
@@ -464,6 +467,91 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response.getheader( 'Access-Control-Allow-Origin' ), '*' )
         
     
+    def _test_get_services( self, connection, set_up_permissions ):
+        
+        should_work = { set_up_permissions[ 'everything' ], set_up_permissions[ 'add_files' ], set_up_permissions[ 'add_tags' ], set_up_permissions[ 'manage_pages' ], set_up_permissions[ 'search_all_files' ], set_up_permissions[ 'search_green_files' ] }
+        should_break = { set_up_permissions[ 'add_urls' ], set_up_permissions[ 'manage_cookies' ] }
+        
+        expected_answer = {
+            'local_tags': [
+                {
+                    'name': 'my tags',
+                    'service_key': '6c6f63616c2074616773'
+                }
+            ],
+            'tag_repositories': [
+                {
+                    'name': 'example tag repo',
+                    'service_key': HG.test_controller.example_tag_repo_service_key.hex()
+                }
+            ],
+            'local_files': [
+                {
+                    'name': 'my files',
+                    'service_key': '6c6f63616c2066696c6573'
+                }
+            ],
+            'file_repositories': [
+            ],
+            'all_local_files': [
+                { 
+                    'name': 'all local files',
+                    'service_key': '616c6c206c6f63616c2066696c6573'
+                }
+            ],
+            'all_known_files': [
+                {
+                    'name': 'all known files',
+                    'service_key': '616c6c206b6e6f776e2066696c6573'
+                }
+            ],
+            'all_known_tags': [
+                {
+                    'name': 'all known tags',
+                    'service_key': '616c6c206b6e6f776e2074616773'
+                }
+            ],
+            'trash': [
+                {
+                    'name': 'trash',
+                    'service_key': '7472617368'
+                }
+            ]
+        }
+        
+        for api_permissions in should_work.union( should_break ):
+            
+            access_key_hex = api_permissions.GetAccessKey().hex()
+            
+            headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+            
+            #
+            
+            path = '/get_services'
+            
+            connection.request( 'GET', path, headers = headers )
+            
+            response = connection.getresponse()
+            
+            data = response.read()
+            
+            if api_permissions in should_work:
+                
+                text = str( data, 'utf-8' )
+                
+                self.assertEqual( response.status, 200 )
+                
+                d = json.loads( text )
+                
+                self.assertEqual( d, expected_answer )
+                
+            else:
+                
+                self.assertEqual( response.status, 403 )
+                
+            
+        
+    
     def _test_add_files_add_file( self, connection, set_up_permissions ):
         
         api_permissions = set_up_permissions[ 'add_files' ]
@@ -472,7 +560,13 @@ class TestClientAPI( unittest.TestCase ):
         
         # fail
         
-        HG.test_controller.SetRead( 'hash_status', ( CC.STATUS_UNKNOWN, None, '' ) )
+        hash = bytes.fromhex( 'a593942cb7ea9ffcd8ccf2f0fa23c338e23bfecd9a3e508dfc0bcf07501ead08' )
+        
+        f = ClientImportFiles.FileImportStatus.STATICGetUnknownStatus()
+        
+        f.hash = hash
+        
+        HG.test_controller.SetRead( 'hash_status', f )
         
         headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_OCTET_STREAM ] }
         
@@ -493,10 +587,19 @@ class TestClientAPI( unittest.TestCase ):
         response_json = json.loads( text )
         
         self.assertEqual( response_json[ 'status' ], CC.STATUS_ERROR )
-        self.assertEqual( response_json[ 'hash' ], 'a593942cb7ea9ffcd8ccf2f0fa23c338e23bfecd9a3e508dfc0bcf07501ead08' )
+        self.assertEqual( response_json[ 'hash' ], hash.hex() )
         self.assertIn( 'Traceback', response_json[ 'note' ] )
         
         # success as body
+        
+        hash = b'\xadm5\x99\xa6\xc4\x89\xa5u\xeb\x19\xc0&\xfa\xce\x97\xa9\xcdey\xe7G(\xb0\xce\x94\xa6\x01\xd22\xf3\xc3'
+        
+        f = ClientImportFiles.FileImportStatus.STATICGetUnknownStatus()
+        
+        f.hash = hash
+        f.note = 'test note'
+        
+        HG.test_controller.SetRead( 'hash_status', f )
         
         hydrus_png_path = os.path.join( HC.STATIC_DIR, 'hydrus.png' )
         
@@ -523,11 +626,18 @@ class TestClientAPI( unittest.TestCase ):
         
         response_json = json.loads( text )
         
-        expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : 'ad6d3599a6c489a575eb19c026face97a9cd6579e74728b0ce94a601d232f3c3' , 'note' : 'test note' }
+        expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : hash.hex() , 'note' : 'test note' }
         
         self.assertEqual( response_json, expected_result )
         
         # do hydrus png as path
+        
+        f = ClientImportFiles.FileImportStatus.STATICGetUnknownStatus()
+        
+        f.hash = hash
+        f.note = 'test note'
+        
+        HG.test_controller.SetRead( 'hash_status', f )
         
         headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
         
@@ -549,7 +659,7 @@ class TestClientAPI( unittest.TestCase ):
         
         response_json = json.loads( text )
         
-        expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : 'ad6d3599a6c489a575eb19c026face97a9cd6579e74728b0ce94a601d232f3c3' , 'note' : 'test note' }
+        expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : hash.hex() , 'note' : 'test note' }
         
         self.assertEqual( response_json, expected_result )
         
@@ -762,36 +872,11 @@ class TestClientAPI( unittest.TestCase ):
     
     def _test_add_tags( self, connection, set_up_permissions ):
         
-        # get services
-        
         api_permissions = set_up_permissions[ 'everything' ]
         
         access_key_hex = api_permissions.GetAccessKey().hex()
         
         headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
-        
-        #
-        
-        path = '/add_tags/get_tag_services'
-        
-        connection.request( 'GET', path, headers = headers )
-        
-        response = connection.getresponse()
-        
-        data = response.read()
-        
-        text = str( data, 'utf-8' )
-        
-        self.assertEqual( response.status, 200 )
-        
-        d = json.loads( text )
-        
-        expected_answer = {}
-        
-        expected_answer[ 'local_tags' ] = [ "my tags" ]
-        expected_answer[ 'tag_repositories' ] = [ "example tag repo" ]
-        
-        self.assertEqual( d, expected_answer )
         
         # clean tags
         
@@ -1050,7 +1135,7 @@ class TestClientAPI( unittest.TestCase ):
         
         hash = os.urandom( 32 )
         
-        url_file_statuses = [ ( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, hash, 'muh import phrase' ) ]
+        url_file_statuses = [ ClientImportFiles.FileImportStatus( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, hash, note = 'muh import phrase' ) ]
         json_url_file_statuses = [ { 'status' : CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, 'hash' : hash.hex(), 'note' : 'muh import phrase' } ]
         
         HG.test_controller.SetRead( 'url_statuses', url_file_statuses )
@@ -1522,6 +1607,101 @@ class TestClientAPI( unittest.TestCase ):
         frozen_expected_cookies = { tuple( row ) for row in expected_cookies }
         
         self.assertEqual( frozen_result_cookies, frozen_expected_cookies )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_headers/set_user_agent'
+        
+        new_user_agent = 'muh user agent'
+        
+        request_dict = { 'user-agent' : new_user_agent }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        current_headers = HG.test_controller.network_engine.domain_manager.GetHeaders( [ ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT ] )
+        
+        self.assertEqual( current_headers[ 'User-Agent' ], new_user_agent )
+        
+        #
+        
+        request_dict = { 'user-agent' : '' }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        current_headers = HG.test_controller.network_engine.domain_manager.GetHeaders( [ ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT ] )
+        
+        from hydrus.client import ClientDefaults
+        
+        self.assertEqual( current_headers[ 'User-Agent' ], ClientDefaults.DEFAULT_USER_AGENT )
+        
+    
+    def _test_manage_database( self, connection, set_up_permissions ):
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        self.assertFalse( HG.client_busy.locked() )
+        
+        path = '/manage_database/lock_on'
+        
+        connection.request( 'POST', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        self.assertTrue( HG.client_busy.locked() )
+        
+        #
+        
+        path = '/manage_pages/get_pages'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 503 )
+        
+        #
+        
+        path = '/manage_database/lock_off'
+        
+        connection.request( 'POST', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        self.assertFalse( HG.client_busy.locked() )
         
     
     def _test_manage_pages( self, connection, set_up_permissions ):
@@ -2256,6 +2436,20 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( hashlib.sha256( data ).digest(), thumb_hash )
         
+        # with "sha256:"" on the front
+        
+        path = '/get_files/thumbnail?hash={}{}'.format( 'sha256:', hash_hex )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        self.assertEqual( hashlib.sha256( data ).digest(), thumb_hash )
+        
         # now 404
         
         hash_404 = os.urandom( 32 )
@@ -2313,6 +2507,8 @@ class TestClientAPI( unittest.TestCase ):
         
         self._test_basics( connection )
         set_up_permissions = self._test_client_api_basics( connection )
+        self._test_get_services( connection, set_up_permissions )
+        self._test_manage_database( connection, set_up_permissions )
         self._test_add_files_add_file( connection, set_up_permissions )
         self._test_add_files_other_actions( connection, set_up_permissions )
         self._test_add_tags( connection, set_up_permissions )

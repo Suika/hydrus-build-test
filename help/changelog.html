@@ -8,6 +8,245 @@
 		<div class="content">
 			<h3 id="changelog"><a href="#changelog">changelog</a></h3>
 			<ul>
+				<li><h3 id="version_446"><a href="#version_446">version 446</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed a typo bug in the latest pending upload routine when it was cancelled/errors out early</li>
+					<li>fixed a problem with the new subscription gap downloader, where when the page opens with the first query, it could sometimes assign 'already in db' to items in that query that were actually 'successful'. some other downloaders may have been rarely hit by this, but it was mostly the gap downloader</li>
+					<li>the client _should_ now support a service host that has path components (e.g. one hosted on a proxy), like myserver.com/hydrus_repo. the port will now be correctly inserted in the address before all requests. hydrus and ipfs both should work, fingers crossed</li>
+					<li>when an admin modifies the account types, the server now only prints the 'updated account type' log record if there were actual changes</li>
+					<li>.</li>
+					<li>downloader UI:</li>
+					<li>the confusingly named 'file import status' and 'gallery search log' in the downloader system are now renamed 'file log'/'search log'/'check log' for the file import queue, gallery downloader, and watcher respectively. the 'table' bitmap buttons are also replaced with simple easy (and easy to refer to!) label buttons.</li>
+					<li>when you open the file/search/check logs from the downloader page list right-click menu, they now spawn properly inside regular windows, not modal dialogs (which were inhibiting interaction with the rest of the program while open)</li>
+					<li>relabelled the awkward 'even if url/hash recognised' checkboxes in file import options. 'do not skip if' becomes 'force download even if', and the text matches that in tag import options for page content. also improved the tooltip on these checkboxes</li>
+					<li>all of the downloader layout boxes have also been renamed and harmonised with each other. gone are overly technical 'import queue' and 'gallery parsing'. now it is generally 'imports' up top and 'search' or 'checker' etc... below</li>
+					<li>layouts have also been harmonised a little. the url downloader page now has boxes for file vs search URLs, the hard drive import pause button is moved up as other pages have, and several off-by-a-pixel sizer layouts have been fixed</li>
+					<li>.</li>
+					<li>null account:</li>
+					<li>to further improve server privacy, particularly after the PTR's multiple account switch, all repositories now forget which accounts uploaded which content after a certain age. by default it is 90 days, but you can check in _review services_ once a server updates. this defends against a variety of hypothetical attacks where someone very clever gains access to the raw server database files, maybe years from now, and tries to crawl its anonymous account history for derivable information--now there is no history!</li>
+					<li>it will take some time to retroactively scrub a huge server like the PTR. for the PTR, it is mostly a relative no-op of moving account ids from the old public shared account to a new 'null' account, but it'll still be about 1.2 billion rows! this happens in the background, so the server will still be useable most of the time, but it will have spikes of 'busy' for about one hour every four (i.e. one hour of mostly busy, three hours of free), probably for several days. it may be a pain to try uploading a bunch of stuff in that time, so if you have a million pending mappings, you might like to just give the PTR a break for a few days. once it has fully caught up, the anonymisation should only be 20-60 seconds of 'busy' a day</li>
+					<li>the way the anonymisation works is all serverside services now have a single non-useable 'null account' that will take possession of all content after the delay. the original uploader is lost, and the whole historical record is merged together.</li>
+					<li>the privacy help doc has been updated to talk about the new anonymising system. overall, I think the null account pretty much eliminates the speculative account cross-referencing worries we had, and I am happy</li>
+					<li>.</li>
+					<li>admin/janny info:</li>
+					<li>for admins, all repositories now have an 'anonymisation period' option that you can edit in the service admin menu, defaulting to 90 days (min 1, max 360). you'll also see summary statements in the server logs as updates are anonymised. anonymisation will kick in two minutes after boot, so if you want to change this value immediately on update, get ready and be quick about it!</li>
+					<li>for jannies who can see accounts, you will see the null account pop up in reference to older content (moreso in future when I expand janny UI and permissions). it being special is highlighted, and various account modifying UI shows it cannot be edited</li>
+					<li>also for jannies/admins, I had to do some wickity woo to get the null account to work without a network update for everyone. if you try to look at the null account on 445 you may get an error. normal users won't run into this, but there's a kind of 'soft' network version update for you today</li>
+				</ul>
+				<li><h3 id="version_445"><a href="#version_445">version 445</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed some weird bugs on the pathname tagging dialog related to removal and re-adding of tags with its 'tags just for selected files' list. previously, in some circumstances, all selected paths could accidentally share the same list of tags, so further edits on a subset selection could affect the entire former selection</li>
+					<li>furthermore, removing a tag from that list when the current path selection has differing tags should now successfully just remove that tag and not accidentally add anything</li>
+					<li>if your client has a pending menu with 'sticky' small tag count that does not seem to clear, the client now tries to recognise a specific miscount cause for this situation and gives you a little popup with instructions on the correct maintenance routine to fix it</li>
+					<li>when pending upload ends, it is now more careful about when it clears the pending count. this is a safety routine, but it not always needed</li>
+					<li>when pending count is recalculated from source, it now uses the older method of counting table rows again. the new 'optimised' count, which works great for current mappings, was working relatively very slow for pending count for large services like the PTR</li>
+					<li>fixed rendering images at >76800% zoom (usually 1x1 pixels in the media viewer), which had broke with the tile renderer</li>
+					<li>improved the serialised png load fix from last week--it now covers more situations</li>
+					<li>added a link, https://github.com/GoAwayNow/Iwara-Hydrus, to Iwara-Hydrus, a userscript to simplify sending Iwara videos to Hydrus Network, to the client api help</li>
+					<li>it should now again be possible to run the client on Windows when the exe is in a network location. it was a build issue related to modern versions of pyinstaller and shiboken2</li>
+					<li>thanks to a user's help, the UPnPc executable discoverer now searches your PATH, and also searches for 'upnpc' executable name as a possible alternative on linux and macOS</li>
+					<li>also thanks to a user, the test script process now exits with code 1 if the test is not OK</li>
+					<li>.</li>
+					<li>optimisations:</li>
+					<li>when a db job is reading data, if that db job happens to fall on a transaction boundary, the result is now returned before the transaction is committed. this should reduce random job lag when the client is busy</li>
+					<li>greatly reduced the amount of database time it takes to check if a file is 'already in db'. the db lookup here is pretty much always less than a millisecond, but the program double-checks against your actual file store (so it can neatly and silently fill in missing files with regular imports), however on an HDD with a couple million files, this could often be a 20ms request! (some user profiles I saw were 200ms!!! I presume this was high latency drives, and/or NAS storage, that was also very busy at the time). since many download queues will have bursts of a page or more of 'already in db' results (from url or hash lookups), this is why they typically only run 30-50 import items a second these days, and until this week, why this situation was blatting the db so hard. the path existence disk request is pulled out of precious db time, allowing other jobs to do other db work while the importer can wait for disk I/O on its thread. I suspect the key to getting the 20ms down to 8ms will be future granulation of the file store (more than 256 folders when you have more than x files per folder, etc...), which I have plans for. I know this change will de-clunk db access when a lot of importers are working, but we'll see this week if the queues actually process a little faster since they can now do file presence checks in parallel and with luck the OS/disk will order their I/O requests cleverly. it may or may not relieve the UI hangs some people have seen, but if these checks are causing trouble it should expose the next bottleneck</li>
+					<li>optimised a small test that checks if a single tag is in the parent/sibling system, typically before adding tags to a file (and hence sometimes spammed when downloaders were working). there was a now-unneeded safety check in here that I believe was throwing off the query planner in some situations</li>
+					<li>the 'review threads' debug UI now has two new tabs for the job schedulers. I will be working with UI-lag-experiencing users in future to see where the biggest problems are here. I suspect part of it will overhead from downloader thread spam, which I have more plans for</li>
+					<li>all jobs that threads schedule on main UI time are now profiled in 'callto' profile mode</li>
+					<li>.</li>
+					<li>site encoding fixes:</li>
+					<li>fixed a problem with webpages that report an encoding for which there is no available decoder. This error is now caught properly, and if 'chardet' is available to provide a supported encoding, it now steps in fixes things automatically. for most users, this fixes japanese sites that report their encoding as "Windows-31J", which seems to be a synonym for Shift-JIS. the 'non-failing unicode decode' function here is also now better at not failing, ha ha, and it delivers richer error descriptions when all attempts to decode are non-successful</li>
+					<li>fixed a problem detecting and decoding webpages with no specified encoding (which defaults to windows-1252 and/or ISO-8859-1 in some weird internet standards thing) using chardet</li>
+					<li>if chardet is not available and all else fails, windows-1252 is now attempted as a last resort</li>
+					<li>added chardet presence to help->about. requests needs it atm so you likely definitely have it, but I'll make it specific in requirements.txt and expand info about it in future</li>
+					<li>.</li>
+					<li>boring code cleanup:</li>
+					<li>refactored the base file import job to its own file</li>
+					<li>client import options are moved to a new submodule, and file, tag, and the future note import options are refactored to their own files</li>
+					<li>wrote a new object to handle current import file status in a better way than the old 'toss a tuple around' method</li>
+					<li>implemented this file import status across most of the import pipeline and cleaned up a heap of import status, hash, mime, and note handling. rarely do downloaders now inspect raw file import status directly--they just ask the import and status object what they think should happen next based on current file import options etc...</li>
+					<li>a url file import's pre-import status urls are now tested main url first, file url second, then associable urls (previously it was pseudorandom)</li>
+					<li>a file import's pre-import status hashes are now tested sha256 first if that is available (previously it was pseudorandom). this probably doesn't matter 99.998% of the time, but maybe hitting 'try again' on a watcher import that failed on a previous boot and also had a dodgy hash parser, it might</li>
+					<li>misc pre-import status prediction logic cleanup, particularly when multiple urls disagree on status and 'exclude previously deleted' is _unchecked_</li>
+					<li>when a hash gives a file pre-import status, the import note now records which hash type it was</li>
+					<li>pulled the 'already in db but doesn't actually exist on disk' pre-import status check out of the db, fixing a long-time ugly file manager call and reducing db lock load significantly</li>
+					<li>updated a host of hacky file import unit tests to less hacky versions with the new status object</li>
+					<li>all scheduled jobs now print better information about themselves in debug code</li>
+				</ul>
+				<li><h3 id="version_444"><a href="#version_444">version 444</a></h3></li>
+				<ul>
+					<li>gave the 'access keys' and 'privacy' help pages a complete pass. the access keys section talks about the read-only shared key, and how to generate you own account, and the privacy section now compiles, as comprehensively as I could, our various discussions about multiple accounts, what you shouldn't upload to the PTR (basically your own name lol), self-signed https certificates, and what information is actually stored on an account</li>
+					<li>expanded the 'getting started - installing' help page with a 'how to run the client' section, including bundling the excellent Linux virtual memory guide written by a user</li>
+					<li>fixed the new 'fill in subscription with gap downloader' button, which was initialising with the wrong downloader at times (usually on the first gap downloader opened, when it opened a new page with it)</li>
+					<li>you can now set 'all known files' for the tag autocomplete in 'write' contexts (e.g. manage tags dialog) when not in advanced mode</li>
+					<li>cleaned up how a variety of delayed UI calls are registered and present information about themselves. every UI job now has a nice human name for debug purposes. this should improve program stability and clear some odd rare errors when closing some dialogs (this mostly affected certain linux users)</li>
+					<li>when an asynchronous UI job fails with a dead window, or if fails to publish to its window for a non-dead reason and then the window dies before that failure returns, the error handling code now catches and silences the error. an example of this would be clicking 'refresh account' on review services, then closing the window before the lagging job raises 'connection failure'</li>
+					<li>when windows are rescued from off screen, their frame key is now stated in the popup note</li>
+					<li>if your version of OpenCV is unable to load PNG files, your client should now be able to load serialised object PNGs (like those in the downloader system) correctly (the same PIL fallback for regular media files now works for deserialisation too)</li>
+					<li>the hydrus log path is finally month-zero-padded, ha ha ha</li>
+					<li>misc cleanup and label fixes</li>
+				</ul>
+				<li><h3 id="version_443"><a href="#version_443">version 443</a></h3></li>
+				<ul>
+					<li>quality of life:</li>
+					<li>when subscriptions hit their 'periodic file limit', which has always been an overly technical term, the popup message now explains the situation in better language. it also now provides a button to automatically fill in the gap via a new gallery downloader page called 'subscription gap downloaders' that gets the query with a file limit five times the size of the sub's periodic download limit</li>
+					<li>I rewrote the logic behind the 'small initial sync, larger periodic sync' detection in subscription sync, improving url counting and reliability through the third, fourth, fifth etc... sync, and then generalised the test to also work without fixed file limits and for large-gallery sites like pixiv, and any site that has URLs that often produce multiple files per URL. essentially, subs now have a nice test for appropriate times to stop url-adding part way through a page (typically, a sub will otherwise always add everything up to the end of a page, in order to catch late-tagged files that have appeared out of order, but if this is done too eagerly, some types of subs perform inefficiently)</li>
+					<li>this matters for PTR accounts: if your repository account does not have permissions to upload something you have pending, the popup message talking about this now hangs around for longer (120 seconds), explains the issue better, and has a button that will take you directly to the _manage services_ panel for the service and will hit up 'check for auto-account creation'</li>
+					<li>in _manage services_, whenever you change the credentials (host, port, or access key) on a restricted service, that service now resets its account to unknown and flags for a swift account re-fetch. this should solve some annoying 'sorry, please hit refresh account in _review services_ to fix that manually' problems</li>
+					<li>a new option in maintenance and processing allows you to disable idle mode if the client api has had a request in the past x minutes. it defaults disabled</li>
+					<li>an important improvement to the main JobScheduler object, which farms out a variety of small fast jobs, now massively reduces Add-Job latency when the queue is very busy. when you have a bunch of downloaders working in the background, the UI should have much less lag now</li>
+					<li>the _options->speed and memory_ page has a full pass. the thumbnail, image, and image tile caches now have their own sections, there is some more help text, and the new but previously hardcoded 10%/25% cache and prefetch limits are now settable and have dynamic guidance text that says 'about a 7,245x4,075 image' as image cache options change</li>
+					<li>all the cache options on this page now apply instantly on dialog ok. no more client restart required!</li>
+					<li>.</li>
+					<li>other stuff, mostly specific niche work:</li>
+					<li>last week's v441->442 update now has a pre-run check for free disk space. users with large sessions may need 10GB or more of free space to do the conversion, and this was not being checked. I will now try to integrate similar checks into all future large updates</li>
+					<li>fixed last week's yandere post parser link update--the post url class should move from legacy moebooru to the new yandere parser correctly</li>
+					<li>the big maintenance tasks of duplicate file potentials search and repository processing will now take longer breaks if the database is busy or their work is otherwise taking a long time. if the client is cluttered with work, they shouldn't accidentally lag out other areas of the program so much</li>
+					<li>label update on ipfs service management panel: the server now reports 'nocopy is available' rather than 'nocopy is enabled'</li>
+					<li>label update on shortcut: 'open a new page: search page' is now '...: choose a page'</li>
+					<li>fixed the little info message dialog when clicking on the page weight label menu item on the 'pages' menu</li>
+					<li>'database is complicated' menu label is updated to 'database is stored in multiple locations'</li>
+					<li>_options->gui pages->controls_ now has a little explanatory text about autocomplete dropdowns and some tooltips</li>
+					<li>migrate database dialog has some red warning text up top and a small layout and label text pass. the 'portable?' is now 'beneath db?'</li>
+					<li>the repository hash_id and tag_id normalisation routines have two improvements: the error now shows specific service_ids that failed to lookup, and the mass-service_hash_id lookup now handles the situation where a hash_id is mapped by more than one service_id</li>
+					<li>repository definition reprocessing now corrects bad service_id rows, which will better heal clients that previously processed bad data</li>
+					<li>the client api and server in general should be better about giving 404s on certain sorts of missing files (it could dump out with 500 in some cases before)</li>
+					<li>it isn't perfect by any means, but the autocomplete dropdown should be a _little_ better about hiding itself in float mode if the parent text input box is scrolled off screen</li>
+					<li>reduced some lag in image neighbour precache when the client is very busy</li>
+					<li>.</li>
+					<li>boring code cleanup:</li>
+					<li>removed old job status 'begin' handling, as it was never really used. jobs now start at creation</li>
+					<li>job titles, tracebacks, and network jobs are now get/set in a nicer way</li>
+					<li>jobs can now store arbitrary labelled callable commands, which in a popup message becomes a labelled button</li>
+					<li>added some user callable button tests to the 'make some popups' debug job</li>
+					<li>file import queues now have the ability to discern 'master' Post URLs from those that were created in multi-file parsing</li>
+					<li>wrote the behind the scenes guts to create a new downloader page programmatically and start a subscription 'gap' query download</li>
+					<li>cleaned up how different timestamps are tracked in the main controller</li>
+				</ul>
+				<li><h3 id="version_442"><a href="#version_442">version 442</a></h3></li>
+				<ul>
+					<li>gui sessions:</li>
+					<li>gui sessions are no longer a monolithic object! now, each page is stored in the database separately, and when a session saves, only those pages that have had changes since the last save are written to db. this will massively reduce long-term HDD writes for clients with large sessions and generally reduce lag during session save intervals</li>
+					<li>the new gui sessions are resilient against database damage--if a page fails to load, or is missing from the new store, its information will be recorded and saved, but the rest of the session will load</li>
+					<li>the new page storage can now be shared across sessions. multiple backups of a session that use the same page now point to the same record, which massively reduces the size of client.db for large-sessioned clients</li>
+					<li>your existing sessions and their backups will obviously be converted to the new system on update. if any fail to load or convert, a backup of the original object will be written to your database directory. the conversion shouldn't take more than a minute or two</li>
+					<li>the old max-object limit at which a session would fail to save was around 10M files and/or 500k urls total. it equated to a saved object of larger than 1Gb, which hit an internal SQLite limit. sessions overall now have no storage limit, but individual pages now inherit the old limit. Please do not hurry to try to test this out with giganto pages. if you want to make do a heap of large long-term downloaders, please spread the job across several pages</li>
+					<li>it seems URLs were the real killer here, so I am rebalancing it so URLs now count for 20 weight each. the weight limit at which point a _page_ will now fail to save, and the client will start generally moaning at you for the whole session (which can be turned off in the options), is therefore raised to 10M. most of the checks are still session-wide for now, but I will do more work here in future</li>
+					<li>if you are in advanced mode, then each page now gives its weight (including combined weight for 'page of pages') from its tab right-click menu. with the new URL weight, let's get a new sense of where the memory is actually hanging around IRL</li>
+					<li>the page and session objects are now more healthily plugged into my serialisation system, so it should be much easier to update them in future (e.g. adding memory for tag sort or current file selection)</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>when subscriptions die, the little reporting popup now includes the death file velocity ('it found fewer than 1 files in the last 90 days' etc...)		</li>
+					<li>the client no longer does vacuums automatically in idle time, and the soft/full maintenance action is removed. as average database size has grown, this old maintenance function has increasingly proved more trouble than it is worth. it will return in future as a per-file thing, with better information to the user on past vacuums and empty pages and estimates on duration to completion, and perhaps some database interrupt tech so it can be cancelled. if you really want to do a vacuum for now, do it outside the program through a SQLite intepreter on the files separately</li>
+					<li>thanks to a user submission, a yande.re post parser is added that should grab tags correct if you are logged in. the existing moebooru post parser default has its yande.re example url removed, so the url_class-parser link should move over on update</li>
+					<li>for file repositories, the client will not try to sync thumbnails until the repository store counts as 'caught up' (on a busy repo, it was trying to pull thumbs that had been deleted 'in the future'). furthermore, a 404 error due a thumb being pulled out of sync will no longer print a load of error info to the log. more work will be needed here in future</li>
+					<li>I fixed another stupid IPFS pin-commit bug, sorry for the trouble! (issue #894)</li>
+					<li>some maintenance-triggered file delete actions are now better about saving a good attached file delition reason</li>
+					<li>when the file maintenance manager does a popup with a lot of thumbnail or file integrity checks, the 'num thumbs regenned/files missing or invalid' number is now preserved through the batches of 256 jobs</li>
+					<li>thoroughly tested and brushed up the 'check for missing/invalid files' maintenance code, particularly in relation to its automatic triggering after a repository processing problem, but I still could not figure out specifically why it is not working for some users. we will have to investigate and try some more things</li>
+					<li>fixed a typo in client api help regarding the 'service_names_to_statuses_to_display_tags' variable name (I had 'displayed' before, which is incorrect)</li>
+					<li>.</li>
+					<li>build fixes:</li>
+					<li>fixed the new Linux and Windows extract builds being tucked into a little 'ubuntu'/'windows' subfolder, sorry for the trouble! They should both now have the same (note Caps) 'Hydrus Network' as their first directory</li>
+					<li>fixed the new Linux build having borked permissions on the executables, sorry for the trouble!</li>
+					<li>since I fixed the urllib3 problem we had with serialised sessions and Retry objects, I removed it from the requirements.txts. now 'requests' can pull what it likes</li>
+					<li>after testing it with the new build, it looks like I was mistaken years ago that anyone could run hydrus from source when inside a 'built' release (due to dll conflicts in CWD vs your python install). maybe this is now only true in py3 where dll loading is a little different, but it was likely always true and my old tests only ever worked because I was in the same/so-similar environment so the dlls were not conflicting. in any case the builds no longer include the .py/.pyw files and the 'hydrus' source folder, since it just doesn't seem to work. if you want to run from source, grab the actual source release in a fresh, non-conflicting directory. I've updated the help regarding this, sorry for any trouble or confusion you have ever run into here</li>
+					<li>updated the running from source document to talk more about actually getting the source and fleshed out the info about running the scripts</li>
+					<li>.</li>
+					<li>misc boring refactoring and db updates:</li>
+					<li>created a new 'pages' gui module and moved Pages, Thumbs, Sort/Collect widgets, Management panel, and the new split Session code into it</li>
+					<li>wrote new container objects for sessions, notebook pages, and media pages, and wrote a new hash-based data object for a media page's management info and file list</li>
+					<li>added a table to the database for storing serialised objects by their hash, and updated the load/save code to work with the new session objects and manage shared page data in the hashed storage</li>
+					<li>a new maintenance routine checks which hashed serialisables are still needed by master containers and deletes the orphans. it can be manually fired from the _database->maintenance_ menu. this routine otherwise runs just after boot and then every 24 hours or every 512MB of new hashed serialisables added, whichever comes first</li>
+					<li>management controllers now discard the random per-session 'page key' from their serialised key lookup, meaning they serialise the same across sessions (making the above hash-page stuff work better!)</li>
+					<li>improved a bunch of access and error code around serialised object load/save</li>
+					<li>improved a heap of session code all over</li>
+					<li>improved serialised object hashing code</li>
+				</ul>
+				<li><h3 id="version_441"><a href="#version_441">version 441</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>after successful testing, all the master builds are now made on github rather than my home dev situation. the clients now work off python 3.8, and several security libraries (e.g. OpenSSL) are now always going to be latest, so there should be several quiet performance and reliability improvements across the program. there are no special install instructions--normal update seems to go fine--but let me know if you do have any trouble. big thanks to the user who did the leg work on developing the workflow build scripts here</li>
+					<li>if you are in advanced mode, namespace file sorting now allows you to set the 'tag display context' on which it will sort. this appears as a new menu button or a button list selection dialog wherever you edit namespace file sorts. if you are not in advanced mode, the default is the 'display tags' I switched to last week (i.e. before any tags are hidden by your tag display options)</li>
+					<li>namespace sort has some related code cleanup. the 'defaults' object is updated and moved to the newer options object</li>
+					<li>the new tiled renderer now checks for rounding errors in zoom calc, which in some cases was giving a single extra (non-existing) native pixel row or column on rightmost or bottommost tile samples</li>
+					<li>the new tiled renderer now double-checks clip regions for validity before attempting to crop</li>
+					<li>improved the reported error information when a tile fails to render</li>
+					<li>when pasting an uneven number of tags into manage siblings/parents, the error is now a nicer popup dialog. I'm pursuing a related error here--if you get this a bunch, please let me know what more info you discover</li>
+					<li>when repositories fail to fetch the update hashes to process, they now force a metadata resync. any processing error should force a metadata resync now</li>
+					<li>added a default url class for the new pixiv _artist_ page format</li>
+					<li>fixed a recent typo bug with ipfs pinning</li>
+					<li>.</li>
+					<li>client api additions:</li>
+					<li>the client api has a new /manage_headers/set_user_agent call, which is a simple hack for now for external programs to set the 'Global' User-Agent. it should allow for some CloudFlare solutions when just copying cookies is not enough</li>
+					<li>the client api has a new /get_services call, which talks about more services and also exposes service_keys for the first time, which are likely to be useful in future. check out the help for an example. the old /add_tags/get_tag_services call is now deprecated, please move to the new call</li>
+					<li>the client api /version call now responds with 'hydrus_version' as well, which this week will be 441</li>
+					<li>the client api now has a semi-experimental /manage_database/lock system, just like the server's. a new 'manage database' permission is added for this. don't play around with this system idly.</li>
+					<li>the client api should now support sha256 hash parameters if they start with a type prefix like 'sha256:0123789abcdef...'</li>
+					<li>the client and server's database lock commands now wait up to five seconds for the database to finish disconnecting to respond</li>
+					<li>expanded client api unit tests to cover the above</li>
+					<li>the client api version is now 17</li>
+					<li>.</li>
+					<li>boring multiple local file services work:</li>
+					<li>the main search object now stores the file domain using a new 'location context' object that will in future hold multiple file services and can say whether we should search files currently in a domain, or those once deleted from it. a variety of back-end search code has been updated to deal with this more flexible situation</li>
+					<li>removed more static references to the single 'my files' domain in db and related code. in a couple places, like mr. bones, it now fetches 'all local files', but this will likely be updated in future to a new umbrella 'all non-trash, non-repo-update-files local files' service</li>
+				</ul>
+				<li><h3 id="version_440"><a href="#version_440">version 440</a></h3></li>
+				<ul>
+					<li>tiled renderer:</li>
+					<li>the tiled renderer now has an additional error catching layer for tile rendering and coordinate calculation and _should_ be immune to to the crashes we have seen from unhandled errors inside Qt paint events</li>
+					<li>when a tile fails to render, a full black square will be used instead. additional error information is quickly printed to the log</li>
+					<li>fixed a tile coordinate bug related to viewer initialisation and shutdown. when the coordinate space is currently bugnuts, now nothing is drawn</li>
+					<li>if the image renderer encounters a file that appears to have a different resolution to that stored in the db, it now gives you a popup and automatically schedules a metadata regen job for that file. this should catch legacy files with EXIF rotation that were imported before hydrus understood that info</li>
+					<li>when a file completes a metadata regen, if the resolution changed it now schedules a force-regen of the thumbnail too</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>added a prototype 'delete lock' for archived files to _options->files and trash_ (issue #846). this will be expanded in future when the metadata conditional object is made to lock various other file states, and there will be some better UI feedback, a padlock icon or similar, and some improved dialog texts. if you use this, let me know how you get on!</li>
+					<li>you can now set a custom namespace sort in the file sort menu. you have to type it manually, like when setting defaults in the options, but it will save with the page and should load up again nicely in the dialog if you edit it. this is an experiment in prep for better namespace sort edit UI</li>
+					<li>fixed an issue sorting by namespaces when one of those namespaces was hidden in the 'single media' tag context. now all 'display' tags are used for sort comparison groups. if users desire the old behaviour, we'll have to add an option, so let me know</li>
+					<li>the various service-level processing errors when update files are missing or janked out now report the actual hash of the bad update file. I am chasing down one of these errors with a couple of users and cannot quite figure out why the repair code is not auto-fixing things</li>
+					<li>fixed a problem when the system tray gets an activate event at unlucky moments</li>
+					<li>the default media viewer zoom centerpoint is now the mouse</li>
+					<li>fixed a typo in the client api with wildcard/namespace tag search--sorry for the trouble!</li>
+					<li>.</li>
+					<li>some boring multiple local file services cleanup:</li>
+					<li>if you have a mixture of trash and normal thumbnails selected, the right-click menu now has separate choices for 'delete trash' and 'delete selected' 'physically now'</li>
+					<li>if you have a mixture of trash and normal thumbnails selected, the advanced delete dialog now similarly provides separate 'physical delete' options for the trashed vs all</li>
+					<li>media viewer, preview viewer, and thumbnail view delete menu service actions are now populated dynamically. it should say 'delete from my files' instead of just 'delete'</li>
+					<li>in some file selection contexts, the 'remote' filter is renamed to 'not local'</li>
+				</ul>
+				<li><h3 id="version_439"><a href="#version_439">version 439</a></h3></li>
+				<ul>
+					<li>tiled image renderer improvements:</li>
+					<li>I believe I fixed the 'non c-contiguous' crash issue with the new tile renderer. I had encountered this while developing, but it was still happening in rare situations--I _think_ in an unlucky edge case where a zoomed tile had the same resolution as the full image rotated by ninety degrees! there is now an additional catch for this situation, as well, to catch any future logical holes.</li>
+					<li>fixed a bug in the new renderer when copying an image to clipboard</li>
+					<li>I greatly mitigated the tiling artifacts with two changes:</li>
+					<li>- zoomed in tiles are now resized with a padding area of up to 4 pixels, with the actual tile cropped afterwards, which allows bilinear and lancsoz interpolation to get accurate neighbour data and have gradient math line up with neighbouring tiles more accurately</li>
+					<li>- on resize and zoom, media canvases now dynamically change tile size to 'neater' float/integer conversion dimensions to reduce sub-pixel panning alignment artifacts (e.g. if your zoom is 300%, the tile is now going to have a dimension that is a multiple of 3)</li>
+					<li>I hacked in a 'rescue offscreen media' calculation after any zoom event. now, if the window is completely out of view after a zoom, it'll snap to the nearest borders, lining against them or overlapping into a buffer zone depending on the zoom. let me know what you think!</li>
+					<li>I fixed a PyQt5 specific object tracking bug, I think the new renderer now works ok for PyQt5!</li>
+					<li>cleaned up some ugly code in the resize section that may have been resulting in incorrect interpolation algorithm choice in some situations</li>
+					<li>fixed a divide by zero issue when zooming out tiny images hugely (e.g. 32x32 at 1%)</li>
+					<li>media windows now try to have at least 1x1 size, just to catch some other weird error situations</li>
+					<li>similarly, tile and native sample sizes will have a minimum of size 1x1, which should fix issues during a delayed startup (issue #872)</li>
+					<li>cleaned up some misc media viewer and tile renderer code</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>I started the next round of database optimisation tech, mostly testing out a pipeline upgrade. autocomplete fetching and wildcard file searching for very large queries should be a little faster to cancel now, and in some situations they should be a little faster. they may be slower for very small jobs, but I expect it to be unnoticeable. if you feel autocomplete is suddenly slow and laggy, let me know!</li>
+					<li>I optimised the basic 'ideal sibling normalisation' database query. this is used in a lot of places, so the little saving here should improve a bunch of work</li>
+					<li>I greatly optimised autocomplete sibling population, particularly for searches with a lot of tag results</li>
+					<li>I brushed up the tag import options UI: changed the 'use defaults' checkbox to a dropdown with clear labels for both modes; renamed the 'fetch tags even if' tag import options to 'force page fetch', which is a better description, and added tooltips to describe their ideal use; added tooltips to blacklist and whitelist; and hid the 'load from defaults' button if not set to view specific options</li>
+					<li>added a 'imgur single media file url' File URL Class, which points to direct file links without a referral header, which should fix some situations where these urls were pointed to by other site parsers</li>
+					<li>collections now store the _most recent_ import timestamp of their contents as the aggregate for time imported. previously they had no value, so would sort randomly with each other. collections therefore now sort by time imported reliably with each other, even if there is no 'correct' answer here</li>
+					<li>these new timestamps and service presence generally, and aggregated archive/inbox status, (all of which can update thumbnail display) is now recalculated when files are removed from the collection. so, hitting _right-click->remove->inbox_ will now update collections with a mix of archived and inboxed to remove the inbox icon immediately</li>
+					<li>as the "Retry has no attribute..." network errors have appeared in new forms, I gave the core of the problem another look. we could never really figure this out, but it seemed to be a network version thread safety issue. I think I have ruled this out, and I now believe these may have been occuring during faulty pickling during network session save/load. I fixed the problem here, so with luck this issue will not reappear--if you have had this a lot, let me know how you get on!</li>
+					<li>I broke the requirements.txt into several variants based on platform. we are going to try to pin down good fixed versions of python-mpv and requests/urllib3 for each platform</li>
+					<li>I also updated the 'running from source' help significantly, moving everything to the requirements.txt and making sections for things like FFMPEG and libmpv</li>
+					<li>Also updated the source and contact help around my work style and contact preferences</li>
+					<li>the test.py file now only does the final input() confirmation if there is an interactive stdin to respond</li>
+				</ul>
 				<li><h3 id="version_438"><a href="#version_438">version 438</a></h3></li>
 				<ul>
 					<li>media viewer:</li>

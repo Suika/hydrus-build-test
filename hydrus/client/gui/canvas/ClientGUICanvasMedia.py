@@ -1614,8 +1614,6 @@ class StaticImage( QW.QWidget ):
         
         self._is_rendered = False
         
-        self._first_background_drawn = False
-        
         self._canvas_tile_size = QC.QSize( 768, 768 )
         
         self._zoom = 1.0
@@ -1643,11 +1641,26 @@ class StaticImage( QW.QWidget ):
             self._zoom = self.width() / self._media.GetResolution()[ 0 ]
             
         
+        # it is most convenient to have tiles that line up with the current zoom ratio
+        # 768 is a convenient size for meaty GPU blitting, but as a number it doesn't make for nice multiplication
+        
+        # a 'nice' size is one that divides nicely by our zoom, so that integer translations between canvas and native res aren't losing too much in the float remainder
+        
+        if self.width() == 0 or self.height() == 0:
+            
+            tile_dimension = 0
+            
+        else:
+            
+            # the max( x, 1 ) bit here ensures that superzoomed 1px things just get one tile
+            tile_dimension = round( max( ( 768 // self._zoom ), 1 ) * self._zoom )
+            
+        
+        self._canvas_tile_size = QC.QSize( tile_dimension, tile_dimension )
+        
         self._canvas_tiles = {}
         
         self._is_rendered = False
-        
-        self._first_background_drawn = False
         
     
     def _DrawBackground( self, painter ):
@@ -1657,8 +1670,6 @@ class StaticImage( QW.QWidget ):
         painter.setBackground( QG.QBrush( new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND ) ) )
         
         painter.eraseRect( painter.viewport() )
-        
-        self._first_background_drawn = True
         
     
     def _DrawTile( self, tile_coordinate ):
@@ -1714,7 +1725,8 @@ class StaticImage( QW.QWidget ):
             canvas_height = my_height % normal_canvas_height
             
         
-        native_width = canvas_width * self._zoom
+        canvas_width = max( 1, canvas_width )
+        canvas_height = max( 1, canvas_height )
         
         # if we are the last row/column our size is not this!
         
@@ -1723,6 +1735,27 @@ class StaticImage( QW.QWidget ):
         canvas_clip_rect = QC.QRect( canvas_topLeft, canvas_size )
         
         native_clip_rect = QC.QRect( canvas_topLeft / self._zoom, canvas_size / self._zoom )
+        
+        # dealing with rounding errors with zoom calc
+        if native_clip_rect.width() + native_clip_rect.x() > media_width:
+            
+            native_clip_rect.setWidth( media_width - native_clip_rect.x() )
+            
+        
+        if native_clip_rect.height() + native_clip_rect.y() > media_height:
+            
+            native_clip_rect.setHeight( media_height - native_clip_rect.y() )
+            
+        
+        if native_clip_rect.width() == 0:
+            
+            native_clip_rect.setWidth( 1 )
+            
+        
+        if native_clip_rect.height() == 0:
+            
+            native_clip_rect.setHeight( 1 )
+            
         
         return ( native_clip_rect, canvas_clip_rect )
         
@@ -1736,6 +1769,11 @@ class StaticImage( QW.QWidget ):
         
     
     def _GetTileCoordinatesInView( self, rect: QC.QRect ):
+        
+        if self.width() == 0 or self.height() == 0 or self._canvas_tile_size.width() == 0 or self._canvas_tile_size.height() == 0:
+            
+            return []
+            
         
         topLeft_tile_coordinate = self._GetTileCoordinateFromPoint( rect.topLeft() )
         bottomRight_tile_coordinate = self._GetTileCoordinateFromPoint( rect.bottomRight() )
@@ -1769,37 +1807,46 @@ class StaticImage( QW.QWidget ):
             return
             
         
-        dirty_tile_coordinates = self._GetTileCoordinatesInView( event.rect() )
-        
-        for dirty_tile_coordinate in dirty_tile_coordinates:
+        try:
             
-            if dirty_tile_coordinate not in self._canvas_tiles:
+            dirty_tile_coordinates = self._GetTileCoordinatesInView( event.rect() )
+            
+            for dirty_tile_coordinate in dirty_tile_coordinates:
                 
-                self._DrawTile( dirty_tile_coordinate )
+                if dirty_tile_coordinate not in self._canvas_tiles:
+                    
+                    self._DrawTile( dirty_tile_coordinate )
+                    
                 
             
-        
-        for dirty_tile_coordinate in dirty_tile_coordinates:
+            for dirty_tile_coordinate in dirty_tile_coordinates:
+                
+                ( tile, pos ) = self._canvas_tiles[ dirty_tile_coordinate ]
+                
+                painter.drawPixmap( pos, tile )
+                
             
-            ( tile, pos ) = self._canvas_tiles[ dirty_tile_coordinate ]
+            all_visible_tile_coordinates = self._GetTileCoordinatesInView( self.visibleRegion().boundingRect() )
             
-            painter.drawPixmap( pos, tile )
+            deletee_tile_coordinates = set( self._canvas_tiles.keys() ).difference( all_visible_tile_coordinates )
             
-        
-        all_visible_tile_coordinates = self._GetTileCoordinatesInView( self.visibleRegion().boundingRect() )
-        
-        deletee_tile_coordinates = set( self._canvas_tiles.keys() ).difference( all_visible_tile_coordinates )
-        
-        for deletee_tile_coordinate in deletee_tile_coordinates:
+            for deletee_tile_coordinate in deletee_tile_coordinates:
+                
+                del self._canvas_tiles[ deletee_tile_coordinate ]
+                
             
-            del self._canvas_tiles[ deletee_tile_coordinate ]
+            if not self._is_rendered:
+                
+                self.readyForNeighbourPrefetch.emit()
+                
+                self._is_rendered = True
+                
             
-        
-        if not self._is_rendered:
+        except Exception as e:
             
-            self.readyForNeighbourPrefetch.emit()
+            HydrusData.PrintException( e, do_wait = False )
             
-            self._is_rendered = True
+            return
             
         
     

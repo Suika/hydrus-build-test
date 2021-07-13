@@ -50,11 +50,11 @@ def CatchExceptionClient( etype, value, tb ):
             
         else:
             
-            try: job_key.SetVariable( 'popup_title', str( etype.__name__ ) )
-            except: job_key.SetVariable( 'popup_title', str( etype ) )
+            try: job_key.SetStatusTitle( str( etype.__name__ ) )
+            except: job_key.SetStatusTitle( str( etype ) )
             
             job_key.SetVariable( 'popup_text_1', first_line )
-            job_key.SetVariable( 'popup_traceback', trace )
+            job_key.SetTraceback( trace )
             
         
         text = job_key.ToString()
@@ -344,10 +344,10 @@ def ShowExceptionTupleClient( etype, value, tb, do_wait = True ):
         
         title = str( getattr( etype, '__name__', etype ) )
         
-        job_key.SetVariable( 'popup_title', title )
+        job_key.SetStatusTitle( title )
         
         job_key.SetVariable( 'popup_text_1', first_line )
-        job_key.SetVariable( 'popup_traceback', trace )
+        job_key.SetTraceback( trace )
         
     
     text = job_key.ToString()
@@ -459,6 +459,31 @@ class Credentials( HydrusData.HydrusYAMLBase ):
         connection_string += self._host + ':' + str( self._port )
         
         return connection_string
+        
+    
+    def GetPortedAddress( self ):
+        
+        if self._host.endswith( '/' ):
+            
+            host = self._host[:-1]
+            
+        else:
+            
+            host = self._host
+            
+        
+        if '/' in host:
+            
+            ( actual_host, gubbins ) = self._host.split( '/', 1 )
+            
+            address = '{}:{}/{}'.format( actual_host, self._port, gubbins )
+            
+        else:
+            
+            address = '{}:{}'.format( self._host, self._port )
+            
+        
+        return address
         
     
     def HasAccessKey( self ): return self._access_key is not None and self._access_key != ''

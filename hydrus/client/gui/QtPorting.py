@@ -1246,7 +1246,16 @@ class CallAfterEventCatcher( QC.QObject ):
         
         if event.type() == CallAfterEventType and isinstance( event, CallAfterEvent ):
             
-            event.Execute()
+            if HG.callto_profile_mode:
+                
+                summary = 'Profiling CallAfter Event: {}'.format( event._fn )
+                
+                HydrusData.Profile( summary, 'event.Execute()', globals(), locals(), min_duration_ms = 3, show_summary = True )
+                
+            else:
+                
+                event.Execute()
+                
             
             event.accept()
             
@@ -2574,9 +2583,9 @@ class CheckBoxDelegate(QW.QStyledItemDelegate):
         
 
 class CollectComboCtrl( QW.QComboBox ):
-
+    
     itemChanged = QC.Signal()
-
+    
     def __init__( self, parent, media_collect ):
         
         QW.QComboBox.__init__( self, parent )
@@ -2587,20 +2596,20 @@ class CollectComboCtrl( QW.QComboBox ):
         self.setItemDelegate( CheckBoxDelegate() )
         
         self.setModel( QG.QStandardItemModel( self ) )
-
+        
         text_and_data_tuples = set()
-
-        sort_by = HC.options[ 'sort_by' ]
-
-        for ( sort_by_type, namespaces ) in sort_by:
+        
+        for media_sort in HG.client_controller.new_options.GetDefaultNamespaceSorts():
+            
+            namespaces = media_sort.GetNamespaces()
             
             text_and_data_tuples.update( namespaces )
             
-
+        
         text_and_data_tuples = sorted( ( ( namespace, ( 'namespace', namespace ) ) for namespace in text_and_data_tuples ) )
         
         ratings_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ) )
-
+        
         for ratings_service in ratings_services:
             
             text_and_data_tuples.append( ( ratings_service.GetName(), ('rating', ratings_service.GetServiceKey() ) ) )

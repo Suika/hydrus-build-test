@@ -16,6 +16,7 @@ from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientExporting
 from hydrus.client import ClientSearch
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUITags
 from hydrus.client.gui import ClientGUITime
@@ -70,7 +71,12 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
         path = ''
         export_type = HC.EXPORT_FOLDER_TYPE_REGULAR
         delete_from_client_after_export = False
-        file_search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY )
+        
+        default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
+        location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ default_local_file_service_key ] )
+        
+        file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context )
+        
         period = 15 * 60
         
         export_folder = ClientExporting.ExportFolder( name, path, export_type = export_type, delete_from_client_after_export = delete_from_client_after_export, file_search_context = file_search_context, period = period, phrase = phrase )
@@ -646,13 +652,13 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._UpdateTxtButton()
         
-        HG.client_controller.CallAfterQtSafe( self._export, self._export.setFocus, QC.Qt.OtherFocusReason)
+        ClientGUIFunctions.SetFocusLater( self._export )
         
         self._paths.itemSelectionChanged.connect( self._RefreshTags )
         
         if do_export_and_then_quit:
             
-            QP.CallAfter( self._DoExport, True )
+            HG.client_controller.CallAfterQtSafe( self, 'doing export before dialog quit', self._DoExport, True )
             
         
     
@@ -867,7 +873,16 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
                 QP.CallAfter( qt_update_label, 'deleting' )
                 
-                deletee_hashes = { media.GetHash() for ( ordering_index, media ) in to_do }
+                delete_lock_for_archived_files = HG.client_controller.new_options.GetBoolean( 'delete_lock_for_archived_files' )
+                
+                if delete_lock_for_archived_files:
+                    
+                    deletee_hashes = { media.GetHash() for ( ordering_index, media ) in to_do if not media.HasArchive() }
+                    
+                else:
+                    
+                    deletee_hashes = { media.GetHash() for ( ordering_index, media ) in to_do }
+                    
                 
                 chunks_of_hashes = HydrusData.SplitListIntoChunks( deletee_hashes, 64 )
                 

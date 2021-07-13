@@ -1,6 +1,5 @@
 import os
 import random
-import time
 import typing
 
 from qtpy import QtCore as QC
@@ -12,7 +11,6 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
-from hydrus.core import HydrusThreading
 from hydrus.core.networking import HydrusNetwork
 
 from hydrus.client import ClientConstants as CC
@@ -30,8 +28,6 @@ from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIImport
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIParsing
-from hydrus.client.gui import ClientGUIResults
-from hydrus.client.gui import ClientGUIResultsSortCollect
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIFileSeedCache
 from hydrus.client.gui import ClientGUIGallerySeedLog
@@ -45,15 +41,16 @@ from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.networking import ClientGUIHydrusNetwork
 from hydrus.client.gui.networking import ClientGUINetworkJobControl
+from hydrus.client.gui.pages import ClientGUIResults
+from hydrus.client.gui.pages import ClientGUIResultsSortCollect
 from hydrus.client.gui.search import ClientGUIACDropdown
-from hydrus.client.gui.search import ClientGUISearch
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.gui.widgets import ClientGUIControls
 from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportGallery
 from hydrus.client.importing import ClientImportLocal
-from hydrus.client.importing import ClientImportOptions
+from hydrus.client.importing.options import FileImportOptions
 from hydrus.client.importing import ClientImportSimpleURLs
 from hydrus.client.importing import ClientImportWatchers
 from hydrus.client.media import ClientMedia
@@ -93,20 +90,25 @@ def CreateManagementController( page_name, management_type, file_service_key = N
     
 def CreateManagementControllerDuplicateFilter():
     
-    file_service_key = CC.LOCAL_FILE_SERVICE_KEY
+    default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
     
-    management_controller = CreateManagementController( 'duplicates', MANAGEMENT_TYPE_DUPLICATE_FILTER, file_service_key = file_service_key )
+    location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ default_local_file_service_key ] )
     
-    file_search_context = ClientSearch.FileSearchContext( file_service_key = file_service_key, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING ) ] )
+    management_controller = CreateManagementController( 'duplicates', MANAGEMENT_TYPE_DUPLICATE_FILTER, file_service_key = default_local_file_service_key )
+    
+    file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING ) ] )
     
     management_controller.SetVariable( 'file_search_context', file_search_context )
     management_controller.SetVariable( 'both_files_match', False )
     
     return management_controller
     
-def CreateManagementControllerImportGallery():
+def CreateManagementControllerImportGallery( page_name = None ):
     
-    page_name = 'gallery'
+    if page_name is None:
+        
+        page_name = 'gallery'
+        
     
     management_controller = CreateManagementController( page_name, MANAGEMENT_TYPE_IMPORT_MULTIPLE_GALLERY, file_service_key = CC.LOCAL_FILE_SERVICE_KEY )
     
@@ -233,11 +235,14 @@ class ManagementController( HydrusSerialisable.SerialisableBase ):
     
     def _GetSerialisableInfo( self ):
         
-        serialisable_keys = { name : value.hex() for ( name, value ) in list(self._keys.items()) }
+        # don't save these
+        TRANSITORY_KEYS = { 'page' }
+        
+        serialisable_keys = { name : value.hex() for ( name, value ) in self._keys.items() if name not in TRANSITORY_KEYS }
         
         serialisable_simples = dict( self._simples )
         
-        serialisable_serialisables = { name : value.GetSerialisableTuple() for ( name, value ) in list(self._serialisables.items()) }
+        serialisable_serialisables = { name : value.GetSerialisableTuple() for ( name, value ) in self._serialisables.items() }
         
         return ( self._page_name, self._management_type, serialisable_keys, serialisable_simples, serialisable_serialisables )
         
@@ -255,7 +260,7 @@ class ManagementController( HydrusSerialisable.SerialisableBase ):
         
         self._keys.update( { name : bytes.fromhex( key ) for ( name, key ) in list(serialisable_keys.items()) } )
         
-        if 'file_service' in self._keys:
+        if 'file_service' in self._keys and HG.client_controller.IsBooted():
             
             if not HG.client_controller.services_manager.ServiceExists( self._keys[ 'file_service' ] ):
                 
@@ -296,7 +301,7 @@ class ManagementController( HydrusSerialisable.SerialisableBase ):
                 automatic_archive = advanced_import_options[ 'automatic_archive' ]
                 associate_source_urls = True
                 
-                file_import_options = ClientImportOptions.FileImportOptions()
+                file_import_options = FileImportOptions.FileImportOptions()
                 
                 file_import_options.SetPreImportOptions( exclude_deleted, do_not_check_known_urls_before_importing, do_not_check_hashes_before_importing, allow_decompression_bombs, min_size, max_size, max_gif_size, min_resolution, max_resolution )
                 file_import_options.SetPostImportOptions( automatic_archive, associate_source_urls )
@@ -428,7 +433,9 @@ class ManagementController( HydrusSerialisable.SerialisableBase ):
                     del serialisable_keys[ 'duplicate_filter_file_domain' ]
                     
                 
-                file_search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING ) ] )
+                location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ CC.LOCAL_FILE_SERVICE_KEY ] )
+                
+                file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING ) ] )
                 
                 serialisable_serialisables[ 'file_search_context' ] = file_search_context.GetSerialisableTuple()
                 
@@ -1526,7 +1533,7 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         
         ManagementPanelImporter.__init__( self, parent, page, controller, management_controller )
         
-        self._import_queue_panel = ClientGUICommon.StaticBox( self, 'import summary' )
+        self._import_queue_panel = ClientGUICommon.StaticBox( self, 'imports' )
         
         self._current_action = ClientGUICommon.BetterStaticText( self._import_queue_panel, ellipsize_end = True )
         
@@ -1548,9 +1555,13 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         
         QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_PERPENDICULAR )
         
-        self._import_queue_panel.Add( self._current_action, CC.FLAGS_EXPAND_PERPENDICULAR )
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, self._current_action, CC.FLAGS_CENTER_PERPENDICULAR_EXPAND_DEPTH )
+        QP.AddToLayout( hbox, self._pause_button, CC.FLAGS_CENTER_PERPENDICULAR )
+        
+        self._import_queue_panel.Add( hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._import_queue_panel.Add( self._file_seed_cache_control, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._import_queue_panel.Add( self._pause_button, CC.FLAGS_ON_RIGHT )
         self._import_queue_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._import_queue_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -1933,8 +1944,8 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'show file import status', 'Show the file import status windows for the selected query.', self._ShowSelectedImportersFileSeedCaches )
-        ClientGUIMenus.AppendMenuItem( menu, 'show gallery log', 'Show the gallery log windows for the selected query.', self._ShowSelectedImportersGallerySeedLogs )
+        ClientGUIMenus.AppendMenuItem( menu, 'show file log', 'Show the file log windows for the selected query.', self._ShowSelectedImportersFileSeedCaches )
+        ClientGUIMenus.AppendMenuItem( menu, 'show search log', 'Show the search log windows for the selected query.', self._ShowSelectedImportersGallerySeedLogs )
         
         if self._CanRetryFailed() or self._CanRetryIgnored():
             
@@ -2204,14 +2215,14 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         file_seed_cache = gallery_import.GetFileSeedCache()
         
-        with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, 'file import status' ) as dlg:
-            
-            panel = ClientGUIFileSeedCache.EditFileSeedCachePanel( dlg, HG.client_controller, file_seed_cache )
-            
-            dlg.SetPanel( panel )
-            
-            dlg.exec()
-            
+        title = 'file log'
+        frame_key = 'file_import_status'
+        
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, title, frame_key )
+        
+        panel = ClientGUIFileSeedCache.EditFileSeedCachePanel( frame, HG.client_controller, file_seed_cache )
+        
+        frame.SetPanel( panel )
         
     
     def _ShowSelectedImportersFiles( self, show = 'presented' ):
@@ -2287,17 +2298,17 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         gallery_seed_log = gallery_import.GetGallerySeedLog()
         
-        with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, 'gallery import log' ) as dlg:
-            
-            read_only = False
-            can_generate_more_pages = True
-            
-            panel = ClientGUIGallerySeedLog.EditGallerySeedLogPanel( dlg, HG.client_controller, read_only, can_generate_more_pages, gallery_seed_log )
-            
-            dlg.SetPanel( panel )
-            
-            dlg.exec()
-            
+        title = 'search log'
+        frame_key = 'gallery_import_log'
+        
+        read_only = False
+        can_generate_more_pages = True
+        
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, title, frame_key )
+        
+        panel = ClientGUIGallerySeedLog.EditGallerySeedLogPanel( frame, HG.client_controller, read_only, can_generate_more_pages, gallery_seed_log )
+        
+        frame.SetPanel( panel )
         
     
     def _UpdateImportStatus( self ):
@@ -2396,7 +2407,7 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
     
     def SetSearchFocus( self ):
         
-        HG.client_controller.CallAfterQtSafe( self._query_input, self._query_input.setFocus, QC.Qt.OtherFocusReason )
+        ClientGUIFunctions.SetFocusLater( self._query_input )
         
     
     def Start( self ):
@@ -2736,8 +2747,8 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'show file import status', 'Show the file import status windows for the selected watcher.', self._ShowSelectedImportersFileSeedCaches )
-        ClientGUIMenus.AppendMenuItem( menu, 'show checker log', 'Show the checker log windows for the selected watcher.', self._ShowSelectedImportersGallerySeedLogs )
+        ClientGUIMenus.AppendMenuItem( menu, 'show file log', 'Show the file log windows for the selected watcher.', self._ShowSelectedImportersFileSeedCaches )
+        ClientGUIMenus.AppendMenuItem( menu, 'show check log', 'Show the checker log windows for the selected watcher.', self._ShowSelectedImportersGallerySeedLogs )
         
         if self._CanRetryFailed() or self._CanRetryIgnored():
             
@@ -3003,14 +3014,14 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         file_seed_cache = watcher.GetFileSeedCache()
         
-        with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, 'file import status' ) as dlg:
-            
-            panel = ClientGUIFileSeedCache.EditFileSeedCachePanel( dlg, HG.client_controller, file_seed_cache )
-            
-            dlg.SetPanel( panel )
-            
-            dlg.exec()
-            
+        title = 'file log'
+        frame_key = 'file_import_status'
+        
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, title, frame_key )
+        
+        panel = ClientGUIFileSeedCache.EditFileSeedCachePanel( frame, HG.client_controller, file_seed_cache )
+        
+        frame.SetPanel( panel )
         
     
     def _ShowSelectedImportersFiles( self, show = 'presented' ):
@@ -3086,17 +3097,17 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         gallery_seed_log = watcher.GetGallerySeedLog()
         
-        with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, 'checker log' ) as dlg:
-            
-            read_only = True
-            can_generate_more_pages = False
-            
-            panel = ClientGUIGallerySeedLog.EditGallerySeedLogPanel( dlg, HG.client_controller, read_only, can_generate_more_pages, gallery_seed_log )
-            
-            dlg.SetPanel( panel )
-            
-            dlg.exec()
-            
+        title = 'check log'
+        frame_key = 'gallery_import_log'
+        
+        read_only = True
+        can_generate_more_pages = False
+        
+        frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, title, frame_key )
+        
+        panel = ClientGUIGallerySeedLog.EditGallerySeedLogPanel( frame, HG.client_controller, read_only, can_generate_more_pages, gallery_seed_log )
+        
+        frame.SetPanel( panel )
         
     
     def _UpdateImportStatus( self ):
@@ -3215,7 +3226,7 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
     
     def SetSearchFocus( self ):
         
-        HG.client_controller.CallAfterQtSafe( self._watcher_url_input, self._watcher_url_input.setFocus, QC.Qt.OtherFocusReason )
+        ClientGUIFunctions.SetFocusLater( self._watcher_url_input )
         
     
     def Start( self ):
@@ -3252,14 +3263,14 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         #
         
-        self._simple_parsing_jobs_panel = ClientGUICommon.StaticBox( self._simple_downloader_panel, 'simple parsing urls' )
+        self._simple_parsing_jobs_panel = ClientGUICommon.StaticBox( self._simple_downloader_panel, 'parsing' )
         
         self._pause_queue_button = ClientGUICommon.BetterBitmapButton( self._simple_parsing_jobs_panel, CC.global_pixmaps().gallery_pause, self.PauseQueue )
         self._pause_queue_button.setToolTip( 'pause/play queue' )
         
         self._parser_status = ClientGUICommon.BetterStaticText( self._simple_parsing_jobs_panel, ellipsize_end = True )
         
-        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._simple_parsing_jobs_panel, self._controller, True, False, self._page_key )
+        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._simple_parsing_jobs_panel, self._controller, True, False, 'parsing', self._page_key )
         
         self._page_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._simple_parsing_jobs_panel )
         
@@ -3307,7 +3318,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         QP.AddToLayout( hbox, self._current_action, CC.FLAGS_CENTER_PERPENDICULAR_EXPAND_DEPTH )
         QP.AddToLayout( hbox, self._pause_files_button, CC.FLAGS_CENTER_PERPENDICULAR )
         
-        self._import_queue_panel.Add( hbox, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._import_queue_panel.Add( hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._import_queue_panel.Add( self._file_seed_cache_control, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._import_queue_panel.Add( self._file_download_control, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -3332,7 +3343,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         QP.AddToLayout( hbox, self._parser_status, CC.FLAGS_CENTER_PERPENDICULAR_EXPAND_DEPTH )
         QP.AddToLayout( hbox, self._pause_queue_button, CC.FLAGS_CENTER_PERPENDICULAR )
         
-        self._simple_parsing_jobs_panel.Add( hbox, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._simple_parsing_jobs_panel.Add( hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._simple_parsing_jobs_panel.Add( self._gallery_seed_log_control, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._simple_parsing_jobs_panel.Add( self._page_download_control, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._simple_parsing_jobs_panel.Add( queue_hbox, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
@@ -3670,7 +3681,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
     
     def SetSearchFocus( self ):
         
-        HG.client_controller.CallAfterQtSafe( self._page_url_input, self._page_url_input.setFocus, QC.Qt.OtherFocusReason )
+        ClientGUIFunctions.SetFocusLater( self._page_url_input )
         
     
     def Start( self ):
@@ -3690,18 +3701,28 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         
         self._url_panel = ClientGUICommon.StaticBox( self, 'url downloader' )
         
-        self._pause_button = ClientGUICommon.BetterBitmapButton( self._url_panel, CC.global_pixmaps().file_pause, self.Pause )
+        #
+        
+        self._import_queue_panel = ClientGUICommon.StaticBox( self._url_panel, 'imports' )
+        
+        self._pause_button = ClientGUICommon.BetterBitmapButton( self._import_queue_panel, CC.global_pixmaps().file_pause, self.Pause )
         self._pause_button.setToolTip( 'pause/play files' )
         
-        self._file_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._url_panel )
+        self._file_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._import_queue_panel )
         
         self._urls_import = self._management_controller.GetVariable( 'urls_import' )
         
-        self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self._url_panel, self._controller, page_key = self._page_key )
+        self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self._import_queue_panel, self._controller, page_key = self._page_key )
         
-        self._gallery_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._url_panel )
+        #
         
-        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._url_panel, self._controller, False, False, page_key = self._page_key )
+        self._gallery_panel = ClientGUICommon.StaticBox( self._url_panel, 'search' )
+        
+        self._gallery_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._gallery_panel )
+        
+        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._gallery_panel, self._controller, False, False, 'search', page_key = self._page_key )
+        
+        #
         
         self._url_input = ClientGUIControls.TextAndPasteCtrl( self._url_panel, self._PendURLs )
         
@@ -3716,11 +3737,15 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         
         #
         
-        self._url_panel.Add( self._pause_button, CC.FLAGS_ON_RIGHT )
-        self._url_panel.Add( self._file_seed_cache_control, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._url_panel.Add( self._file_download_control, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._url_panel.Add( self._gallery_seed_log_control, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._url_panel.Add( self._gallery_download_control, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._import_queue_panel.Add( self._pause_button, CC.FLAGS_ON_RIGHT )
+        self._import_queue_panel.Add( self._file_seed_cache_control, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._import_queue_panel.Add( self._file_download_control, CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        self._gallery_panel.Add( self._gallery_seed_log_control, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._gallery_panel.Add( self._gallery_download_control, CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        self._url_panel.Add( self._import_queue_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._url_panel.Add( self._gallery_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._url_panel.Add( self._url_input, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._url_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._url_panel.Add( self._tag_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -3821,7 +3846,7 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
     
     def SetSearchFocus( self ):
         
-        HG.client_controller.CallAfterQtSafe( self._url_input, self._url_input.setFocus, QC.Qt.OtherFocusReason )
+        ClientGUIFunctions.SetFocusLater( self._url_input )
         
     
     def Start( self ):
@@ -4439,7 +4464,7 @@ class ManagementPanelPetitions( ManagementPanel ):
                     
                     job_key = ClientThreading.JobKey( cancellable = True )
                     
-                    job_key.SetVariable( 'popup_title', 'committing petitions' )
+                    job_key.SetStatusTitle( 'committing petitions' )
                     
                     HG.client_controller.pub( 'message', job_key )
                     
@@ -4897,7 +4922,7 @@ class ManagementPanelQuery( ManagementPanel ):
         
         if self._search_enabled:
             
-            HG.client_controller.CallAfterQtSafe( self._tag_autocomplete, self._tag_autocomplete.setFocus, QC.Qt.OtherFocusReason )
+            ClientGUIFunctions.SetFocusLater( self._tag_autocomplete )
             
         
     

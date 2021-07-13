@@ -6,9 +6,7 @@ import numpy.core.multiarray # important this comes before cv!
 import cv2
 
 from hydrus.client import ClientConstants as CC
-from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusGlobals as HG
 
@@ -199,7 +197,7 @@ def ResizeNumPyImageForMediaViewer( mime, numpy_image, target_resolution ):
     
     ( scale_up_quality, scale_down_quality ) = new_options.GetMediaZoomQuality( mime )
     
-    ( image_width, image_height, depth ) = numpy_image.shape
+    ( image_height, image_width, depth ) = numpy_image.shape
     
     if ( target_width, target_height ) == ( image_height, image_width ):
         
@@ -207,7 +205,7 @@ def ResizeNumPyImageForMediaViewer( mime, numpy_image, target_resolution ):
         
     else:
         
-        if target_width > image_height or target_height > image_width:
+        if target_width > image_width or target_height > image_height:
             
             interpolation = cv_interpolation_enum_lookup[ scale_up_quality ]
             

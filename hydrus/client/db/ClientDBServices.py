@@ -1,14 +1,11 @@
-import os
 import sqlite3
 import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusDB
 from hydrus.core import HydrusDBModule
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusSerialisable
-from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientServices
@@ -22,7 +19,6 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
         self._service_ids_to_services = {}
         self._service_keys_to_service_ids = {}
         
-        self.local_file_service_id = None
         self.local_update_service_id = None
         self.trash_service_id = None
         self.combined_local_file_service_id = None
@@ -56,7 +52,6 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
                 self._service_keys_to_service_ids[ service_key ] = service_id
                 
             
-            self.local_file_service_id = self.GetServiceId( CC.LOCAL_FILE_SERVICE_KEY )
             self.local_update_service_id = self.GetServiceId( CC.LOCAL_UPDATE_SERVICE_KEY )
             self.trash_service_id = self.GetServiceId( CC.TRASH_SERVICE_KEY )
             self.combined_local_file_service_id = self.GetServiceId( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
@@ -92,11 +87,7 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
         self._service_ids_to_services[ service_id ] = service
         self._service_keys_to_service_ids[ service_key ] = service_id
         
-        if service_key == CC.LOCAL_FILE_SERVICE_KEY:
-            
-            self.local_file_service_id = service_id
-            
-        elif service_key == CC.LOCAL_UPDATE_SERVICE_KEY:
+        if service_key == CC.LOCAL_UPDATE_SERVICE_KEY:
             
             self.local_update_service_id = service_id
             

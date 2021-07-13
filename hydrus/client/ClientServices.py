@@ -732,9 +732,9 @@ class ServiceRemote( Service ):
     
     def _GetBaseURL( self ):
         
-        ( host, port ) = self._credentials.GetAddress()
+        full_host = self._credentials.GetPortedAddress()
         
-        base_url = 'https://' + host + ':' + str( port ) + '/'
+        base_url = 'https://{}/'.format( full_host )
         
         return base_url
         
@@ -772,6 +772,11 @@ class ServiceRemote( Service ):
                 raise HydrusExceptions.BandwidthException( 'bandwidth exceeded' )
                 
             
+        
+    
+    def _CredentialsAreChanging( self ):
+        
+        pass
         
     
     def _GetSerialisableDictionary( self ):
@@ -834,9 +839,14 @@ class ServiceRemote( Service ):
             
         
     
-    def SetCredentials( self, credentials ):
+    def SetCredentials( self, credentials: HydrusNetwork.Credentials ):
         
         with self._lock:
+            
+            if credentials.DumpToString() != self._credentials.DumpToString():
+                
+                self._CredentialsAreChanging()
+                
             
             self._credentials = credentials
             
@@ -851,6 +861,8 @@ class ServiceRestricted( ServiceRemote ):
         account_key = self._account.GetAccountKey()
         
         self._account = HydrusNetwork.Account.GenerateUnknownAccount( account_key )
+        
+        HG.client_controller.pub( 'notify_account_sync_due' )
         
         self._next_account_sync = HydrusData.GetNow()
         
@@ -923,6 +935,19 @@ class ServiceRestricted( ServiceRemote ):
             
         
         ServiceRemote._CheckCanCommunicateExternally( self, including_bandwidth = including_bandwidth )
+        
+    
+    def _CredentialsAreChanging( self ):
+        
+        account_key = self._account.GetAccountKey()
+        
+        self._account = HydrusNetwork.Account.GenerateUnknownAccount( account_key )
+        
+        self._next_account_sync = HydrusData.GetNow()
+        
+        self._SetDirty()
+        
+        HG.client_controller.pub( 'notify_account_sync_due' )
         
     
     def _GetSerialisableDictionary( self ):
@@ -1236,6 +1261,18 @@ class ServiceRestricted( ServiceRemote ):
             
         
     
+    def SetAccountRefreshDueNow( self ):
+        
+        with self._lock:
+            
+            self._next_account_sync = HydrusData.GetNow()
+            
+            self._SetDirty()
+            
+        
+        HG.client_controller.pub( 'notify_account_sync_due' )
+        
+    
     def SetClean( self ):
         
         ServiceRemote.SetClean( self )
@@ -1317,8 +1354,6 @@ class ServiceRestricted( ServiceRemote ):
                     pass
                     
                 
-                HG.client_controller.pub( 'notify_new_permissions' )
-                
             except ( HydrusExceptions.CancelledException, HydrusExceptions.NetworkException ) as e:
                 
                 HydrusData.Print( 'Failed to refresh account for {}:'.format( name ) )
@@ -1354,6 +1389,7 @@ class ServiceRestricted( ServiceRemote ):
                     self._SetDirty()
                     
                 
+                HG.client_controller.pub( 'notify_new_permissions' )
                 HG.client_controller.pub( 'important_dirt_to_clean' )
                 
             
@@ -1548,7 +1584,7 @@ class ServiceRepository( ServiceRestricted ):
             
             with self._lock:
                 
-                if do_a_full_metadata_resync:
+                if self._do_a_full_metadata_resync:
                     
                     self._metadata = HydrusNetwork.Metadata()
                     
@@ -1585,7 +1621,7 @@ class ServiceRepository( ServiceRestricted ):
             
             try:
                 
-                job_key.SetVariable( 'popup_title', name + ' sync: downloading updates' )
+                job_key.SetStatusTitle( name + ' sync: downloading updates' )
                 
                 HG.client_controller.pub( 'message', job_key )
                 
@@ -1628,6 +1664,8 @@ class ServiceRepository( ServiceRestricted ):
                         return
                         
                     except HydrusExceptions.NetworkException as e:
+                        
+                        self._DelayFutureRequests( str( e ) )
                         
                         HydrusData.Print( 'Attempting to download an update for ' + name + ' resulted in a network error:' )
                         
@@ -1752,7 +1790,7 @@ class ServiceRepository( ServiceRestricted ):
             
             title = '{} sync: processing updates'.format( self._name )
             
-            job_key.SetVariable( 'popup_title', title )
+            job_key.SetStatusTitle( title )
             
             ( this_is_first_definitions_work, definition_hashes, this_is_first_content_work, content_hashes ) = HG.client_controller.Read( 'repository_update_hashes_to_process', self._service_key )
             
@@ -1800,9 +1838,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE )
                         
-                        self._do_a_full_metadata_resync = True
-                        
-                        raise Exception( 'An unusual error has occured during repository processing: an update file was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.' )
+                        raise Exception( 'An unusual error has occured during repository processing: an update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -1818,18 +1854,14 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA )
                         
-                        self._do_a_full_metadata_resync = True
-                        
-                        raise Exception( 'An unusual error has occured during repository processing: an update file was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.' )
+                        raise Exception( 'An unusual error has occured during repository processing: an update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     if not isinstance( definition_update, HydrusNetwork.DefinitionsUpdate ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                         
-                        self._do_a_full_metadata_resync = True
-                        
-                        raise Exception( 'An unusual error has occured during repository processing: an update file has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance to fix them, or tell it to do so manually, before unpausing your repository.' )
+                        raise Exception( 'An unusual error has occured during repository processing: an update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance to fix them, or tell it to do so manually, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     rows_in_this_update = definition_update.GetNumRows()
@@ -1846,21 +1878,25 @@ class ServiceRepository( ServiceRestricted ):
                         
                         if HG.client_controller.CurrentlyVeryIdle():
                             
-                            work_time = 29.5
-                            break_time = 0.5
+                            work_time = 30
+                            break_percentage = 0.03
                             
                         elif HG.client_controller.CurrentlyIdle():
                             
-                            work_time = 9.5
-                            break_time = 0.5
+                            work_time = 10
+                            break_percentage = 0.05
                             
                         else:
                             
-                            work_time = 0.45
-                            break_time = 0.05
+                            work_time = 0.5
+                            break_percentage = 0.1
                             
                         
+                        start_time = HydrusData.GetNowPrecise()
+                        
                         num_rows_done = HG.client_controller.WriteSynchronous( 'process_repository_definitions', self._service_key, definition_hash, iterator_dict, job_key, work_time )
+                        
+                        time_it_took = HydrusData.GetNowPrecise() - start_time
                         
                         rows_done_in_this_update += num_rows_done
                         total_definition_rows_completed += num_rows_done
@@ -1879,12 +1915,7 @@ class ServiceRepository( ServiceRestricted ):
                             return
                             
                         
-                        if HydrusData.TimeHasPassedPrecise( this_work_start_time + work_time ):
-                            
-                            time.sleep( break_time )
-                            
-                            HG.client_controller.WaitUntilViewFree()
-                            
+                        time.sleep( break_percentage * time_it_took )
                         
                         self._ReportOngoingRowSpeed( job_key, rows_done_in_this_update, rows_in_this_update, this_work_start_time, num_rows_done, 'definitions' )
                         
@@ -1934,9 +1965,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE )
                         
-                        self._do_a_full_metadata_resync = True
-                        
-                        raise Exception( 'An unusual error has occured during repository processing: an update file was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.' )
+                        raise Exception( 'An unusual error has occured during repository processing: an update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -1952,18 +1981,14 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA )
                         
-                        self._do_a_full_metadata_resync = True
-                        
-                        raise Exception( 'An unusual error has occured during repository processing: an update file was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.' )
+                        raise Exception( 'An unusual error has occured during repository processing: an update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     if not isinstance( content_update, HydrusNetwork.ContentUpdate ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                         
-                        self._do_a_full_metadata_resync = True
-                        
-                        raise Exception( 'An unusual error has occured during repository processing: an update file has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance to fix them, or tell it to do so manually, before unpausing your repository.' )
+                        raise Exception( 'An unusual error has occured during repository processing: an update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance to fix them, or tell it to do so manually, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     rows_in_this_update = content_update.GetNumRows()
@@ -1986,21 +2011,25 @@ class ServiceRepository( ServiceRestricted ):
                         
                         if HG.client_controller.CurrentlyVeryIdle():
                             
-                            work_time = 29.5
-                            break_time = 0.5
+                            work_time = 30
+                            break_percentage = 0.03
                             
                         elif HG.client_controller.CurrentlyIdle():
                             
-                            work_time = 9.5
-                            break_time = 0.5
+                            work_time = 10
+                            break_percentage = 0.05
                             
                         else:
                             
-                            work_time = 0.45
-                            break_time = 0.05
+                            work_time = 0.5
+                            break_percentage = 0.1
                             
                         
+                        start_time = HydrusData.GetNowPrecise()
+                        
                         num_rows_done = HG.client_controller.WriteSynchronous( 'process_repository_content', self._service_key, content_hash, iterator_dict, job_key, work_time )
+                        
+                        time_it_took = HydrusData.GetNowPrecise() - start_time
                         
                         rows_done_in_this_update += num_rows_done
                         total_content_rows_completed += num_rows_done
@@ -2019,12 +2048,7 @@ class ServiceRepository( ServiceRestricted ):
                             return
                             
                         
-                        if HydrusData.TimeHasPassedPrecise( this_work_start_time + work_time ):
-                            
-                            time.sleep( break_time )
-                            
-                            HG.client_controller.WaitUntilViewFree()
-                            
+                        time.sleep( break_percentage * time_it_took )
                         
                         self._ReportOngoingRowSpeed( job_key, rows_done_in_this_update, rows_in_this_update, this_work_start_time, num_rows_done, 'content rows' )
                         
@@ -2052,11 +2076,13 @@ class ServiceRepository( ServiceRestricted ):
             
             with self._lock:
                 
-                message = 'Failed to process updates for the ' + self._name + ' repository! The error follows:'
+                message = 'Failed to process updates for the {} repository! The error follows:'.format( self._name )
                 
                 HydrusData.ShowText( message )
                 
                 HydrusData.ShowException( e )
+                
+                self._do_a_full_metadata_resync = True
                 
                 self._update_processing_paused = True
                 
@@ -2133,7 +2159,6 @@ class ServiceRepository( ServiceRestricted ):
             
         
         HG.client_controller.pub( 'important_dirt_to_clean' )
-        
         HG.client_controller.pub( 'notify_new_permissions' )
         
     
@@ -2150,6 +2175,28 @@ class ServiceRepository( ServiceRestricted ):
         with self._lock:
             
             return self._metadata.GetNextUpdateDueString( from_client = True )
+            
+        
+    
+    def GetNullificationPeriod( self ) -> int:
+        
+        with self._lock:
+            
+            if 'nullification_period' in self._service_options:
+                
+                nullification_period = self._service_options[ 'nullification_period' ]
+                
+                if not isinstance( nullification_period, int ):
+                    
+                    raise HydrusExceptions.DataMissing( 'This service has a bad anonymisation period! Try refreshing your account!' )
+                    
+                
+                return nullification_period
+                
+            else:
+                
+                raise HydrusExceptions.DataMissing( 'This service does not seem to have an anonymisation period! Try refreshing your account!' )
+                
             
         
     
@@ -2310,6 +2357,7 @@ class ServiceRepository( ServiceRestricted ):
             self._no_requests_until = 0
             
             self._account = HydrusNetwork.Account.GenerateUnknownAccount()
+            
             self._next_account_sync = 0
             
             self._metadata = HydrusNetwork.Metadata()
@@ -2319,6 +2367,7 @@ class ServiceRepository( ServiceRestricted ):
             self._SetDirty()
             
         
+        HG.client_controller.pub( 'notify_account_sync_due' )
         HG.client_controller.pub( 'important_dirt_to_clean' )
         
         HG.client_controller.Write( 'reset_repository', self )
@@ -2334,7 +2383,10 @@ class ServiceRepository( ServiceRestricted ):
                 
                 self._SyncDownloadUpdates( stop_time )
                 
-                self.SyncThumbnails( stop_time )
+                if self._is_mostly_caught_up is not None and self._is_mostly_caught_up:
+                    
+                    self.SyncThumbnails( stop_time )
+                    
                 
             except HydrusExceptions.ShutdownException:
                 
@@ -2391,7 +2443,7 @@ class ServiceRepository( ServiceRestricted ):
             
             try:
                 
-                job_key.SetVariable( 'popup_title', name + ' sync: downloading thumbnails' )
+                job_key.SetStatusTitle( name + ' sync: downloading thumbnails' )
                 
                 HG.client_controller.pub( 'message', job_key )
                 
@@ -2430,6 +2482,10 @@ class ServiceRepository( ServiceRestricted ):
                     except HydrusExceptions.CancelledException as e:
                         
                         self._DelayFutureRequests( str( e ) )
+                        
+                        return
+                        
+                    except HydrusExceptions.NotFoundException:
                         
                         return
                         
@@ -2480,14 +2536,14 @@ class ServiceIPFS( ServiceRemote ):
     
     def _GetAPIBaseURL( self ):
         
-        ( host, port ) = self._credentials.GetAddress()
+        full_host = self._credentials.GetPortedAddress()
         
-        api_base_url = 'http://' + host + ':' + str( port ) + '/api/v0/'
+        api_base_url = 'http://{}/api/v0/'.format( full_host )
         
         return api_base_url
         
     
-    def ConvertMultihashToURLTree( self, name, size, multihash, job_key = None ):
+    def ConvertMultihashToURLTree( self, name, size, multihash, job_key: typing.Optional[ ClientThreading.JobKey ] = None ):
         
         with self._lock:
             
@@ -2500,7 +2556,7 @@ class ServiceIPFS( ServiceRemote ):
         
         if job_key is not None:
             
-            job_key.SetVariable( 'popup_network_job', network_job )
+            job_key.SetNetworkJob( network_job )
             
         
         try:
@@ -2513,7 +2569,7 @@ class ServiceIPFS( ServiceRemote ):
             
             if job_key is not None:
                 
-                job_key.SetVariable( 'popup_network_job', None )
+                job_key.DeleteNetworkJob()
                 
                 if job_key.IsCancelled():
                     
@@ -2621,7 +2677,7 @@ class ServiceIPFS( ServiceRemote ):
             
         
     
-    def GetNoCopyEnabled( self ):
+    def GetNoCopyAvailable( self ):
         
         with self._lock:
             
@@ -2802,7 +2858,7 @@ class ServiceIPFS( ServiceRemote ):
         
         job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
         
-        job_key.SetVariable( 'popup_title', 'creating ipfs directory on ' + self._name )
+        job_key.SetStatusTitle( 'creating ipfs directory on ' + self._name )
         
         HG.client_controller.pub( 'message', job_key )
         
@@ -2840,7 +2896,7 @@ class ServiceIPFS( ServiceRemote ):
                         
                     except HydrusExceptions.DataMissing:
                         
-                        HydrusData.ShowText( 'File {} could not be pinned!'.format( hash.hexh() ) )
+                        HydrusData.ShowText( 'File {} could not be pinned!'.format( hash.hex() ) )
                         
                         continue
                         

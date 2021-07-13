@@ -2,7 +2,6 @@ import itertools
 import os
 import random
 import time
-import traceback
 import typing
 
 from qtpy import QtCore as QC
@@ -305,7 +304,16 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea ):
             
         
     
-    def _Delete( self, file_service_key = None ):
+    def _Delete( self, file_service_key = None, only_those_in_file_service_key = None ):
+        
+        media_to_delete = self._selected_media
+        
+        if only_those_in_file_service_key is not None:
+            
+            media_to_delete = ClientMedia.FlattenMedia( media_to_delete )
+            
+            media_to_delete = [ m for m in media_to_delete if only_those_in_file_service_key in m.GetLocationsManager().GetCurrent() ]
+            
         
         if file_service_key is None or file_service_key in ( CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ):
             
@@ -318,7 +326,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea ):
         
         try:
             
-            ( involves_physical_delete, jobs ) = ClientGUIDialogsQuick.GetDeleteFilesJobs( self, self._selected_media, default_reason, suggested_file_service_key = file_service_key )
+            ( involves_physical_delete, jobs ) = ClientGUIDialogsQuick.GetDeleteFilesJobs( self, media_to_delete, default_reason, suggested_file_service_key = file_service_key )
             
         except HydrusExceptions.CancelledException:
             
@@ -3259,6 +3267,9 @@ class MediaPanelThumbnails( MediaPanel ):
         all_file_domains = HydrusData.MassUnion( locations_manager.GetCurrent() for locations_manager in all_locations_managers )
         all_specific_file_domains = all_file_domains.difference( { CC.COMBINED_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY } )
         all_local_file_domains = services_manager.Filter( all_specific_file_domains, ( HC.LOCAL_FILE_DOMAIN, ) )
+        
+        all_local_file_domains_sorted = sorted( all_local_file_domains, key = HG.client_controller.services_manager.GetName )
+        
         all_file_repos = services_manager.Filter( all_specific_file_domains, ( HC.FILE_REPOSITORY, ) )
         
         has_local = True in ( locations_manager.IsLocal() for locations_manager in all_locations_managers )
@@ -3636,14 +3647,19 @@ class MediaPanelThumbnails( MediaPanel ):
             
             ClientGUIMenus.AppendSeparator( menu )
             
-            if selection_has_local_file_domain:
+            for file_service_key in all_local_file_domains_sorted:
                 
-                ClientGUIMenus.AppendMenuItem( menu, local_delete_phrase, 'Delete the selected files from \'my files\'.', self._Delete )
+                ClientGUIMenus.AppendMenuItem( menu, '{} from {}'.format( local_delete_phrase, HG.client_controller.services_manager.GetName( file_service_key ) ), 'Delete the selected files.', self._Delete, file_service_key )
                 
             
             if selection_has_trash:
                 
-                ClientGUIMenus.AppendMenuItem( menu, delete_physically_phrase, 'Delete the selected files from the trash, forcing an immediate physical delete from your hard drive.', self._Delete, CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
+                if selection_has_local_file_domain:
+                    
+                    ClientGUIMenus.AppendMenuItem( menu, 'delete trash physically now', 'Completely delete the selected trashed files, forcing an immediate physical delete from your hard drive.', self._Delete, CC.COMBINED_LOCAL_FILE_SERVICE_KEY, only_those_in_file_service_key = CC.TRASH_SERVICE_KEY )
+                    
+                
+                ClientGUIMenus.AppendMenuItem( menu, delete_physically_phrase, 'Completely delete the selected files, forcing an immediate physical delete from your hard drive.', self._Delete, CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
                 ClientGUIMenus.AppendMenuItem( menu, undelete_phrase, 'Restore the selected files back to \'my files\'.', self._Undelete )
                 
             
@@ -4176,7 +4192,7 @@ class MediaPanelThumbnails( MediaPanel ):
             
             hashes_to_media_results = { media_result.GetHash() : media_result for media_result in media_results }
             
-            HG.client_controller.CallLaterQtSafe( win, 0, qt_do_update, hashes_to_media_results )
+            HG.client_controller.CallAfterQtSafe( win, 'new file info notification', qt_do_update, hashes_to_media_results )
             
         
         affected_hashes = self._hashes.intersection( hashes )

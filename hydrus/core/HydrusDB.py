@@ -323,6 +323,7 @@ class HydrusDB( object ):
         
         self._db = None
         self._c = None
+        self._is_connected = False
         
         self._cursor_transaction_wrapper = None
         
@@ -422,7 +423,7 @@ class HydrusDB( object ):
     
     def _AttachExternalDatabases( self ):
         
-        for ( name, filename ) in list(self._db_filenames.items()):
+        for ( name, filename ) in self._db_filenames.items():
             
             if name == 'main':
                 
@@ -463,6 +464,8 @@ class HydrusDB( object ):
             
             self._db = None
             self._c = None
+            
+            self._is_connected = False
             
             self._cursor_transaction_wrapper = None
             
@@ -615,6 +618,8 @@ class HydrusDB( object ):
             
             self._c = self._db.cursor()
             
+            self._is_connected = True
+            
             self._cursor_transaction_wrapper = DBCursorTransactionWrapper( self._c, HG.db_transaction_commit_period )
             
             self._LoadModules()
@@ -726,6 +731,13 @@ class HydrusDB( object ):
                 result = self._Write( action, *args, **kwargs )
                 
             
+            self._cursor_transaction_wrapper.Save()
+            
+            if job.IsSynchronous():
+                
+                job.PutResult( result )
+                
+            
             if self._cursor_transaction_wrapper.TimeToCommit():
                 
                 self._current_status = 'db committing'
@@ -734,17 +746,8 @@ class HydrusDB( object ):
                 
                 self._cursor_transaction_wrapper.CommitAndBegin()
                 
-            else:
-                
-                self._cursor_transaction_wrapper.Save()
-                
             
             self._DoAfterJobWork()
-            
-            if job.IsSynchronous():
-                
-                job.PutResult( result )
-                
             
         except Exception as e:
             
@@ -892,7 +895,7 @@ class HydrusDB( object ):
         
         total = 0
         
-        for filename in list(self._db_filenames.values()):
+        for filename in self._db_filenames.values():
             
             path = os.path.join( self._db_dir, filename )
             
@@ -931,6 +934,11 @@ class HydrusDB( object ):
     def GetStatus( self ):
         
         return ( self._current_status, self._current_job_name )
+        
+    
+    def IsConnected( self ):
+        
+        return self._is_connected
         
     
     def IsDBUpdated( self ):

@@ -20,6 +20,7 @@ from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusTagArchive
 from hydrus.core import HydrusText
+from hydrus.core import HydrusThreading
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
@@ -83,13 +84,15 @@ class MigrateDatabasePanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         #
         
-        info_panel = ClientGUICommon.StaticBox( self, 'locations' )
+        info_panel = ClientGUICommon.StaticBox( self, 'database components' )
         
         self._current_install_path_st = ClientGUICommon.BetterStaticText( info_panel )
         self._current_db_path_st = ClientGUICommon.BetterStaticText( info_panel )
         self._current_media_paths_st = ClientGUICommon.BetterStaticText( info_panel )
         
-        current_media_locations_listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( info_panel )
+        file_locations_panel = ClientGUICommon.StaticBox( self, 'media file locations' )
+        
+        current_media_locations_listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( file_locations_panel )
         
         self._current_media_locations_listctrl = ClientGUIListCtrl.BetterListCtrl( current_media_locations_listctrl_panel, CGLC.COLUMN_LIST_DB_MIGRATION_LOCATIONS.ID, 8, self._ConvertLocationToListCtrlTuples )
         self._current_media_locations_listctrl.setSelectionMode( QW.QAbstractItemView.SingleSelection )
@@ -103,29 +106,33 @@ class MigrateDatabasePanel( ClientGUIScrolledPanels.ReviewPanel ):
         current_media_locations_listctrl_panel.AddButton( 'decrease location weight', self._DecreaseWeight, enabled_check_func = self._CanDecreaseWeight )
         current_media_locations_listctrl_panel.AddButton( 'remove location', self._RemoveSelectedPath, enabled_check_func = self._CanRemoveLocation )
         
-        self._thumbnails_location = QW.QLineEdit( info_panel )
+        self._thumbnails_location = QW.QLineEdit( file_locations_panel )
         self._thumbnails_location.setEnabled( False )
         
-        self._thumbnails_location_set = ClientGUICommon.BetterButton( info_panel, 'set', self._SetThumbnailLocation )
+        self._thumbnails_location_set = ClientGUICommon.BetterButton( file_locations_panel, 'set', self._SetThumbnailLocation )
         
-        self._thumbnails_location_clear = ClientGUICommon.BetterButton( info_panel, 'clear', self._ClearThumbnailLocation )
+        self._thumbnails_location_clear = ClientGUICommon.BetterButton( file_locations_panel, 'clear', self._ClearThumbnailLocation )
         
-        self._rebalance_status_st = ClientGUICommon.BetterStaticText( info_panel )
+        self._rebalance_status_st = ClientGUICommon.BetterStaticText( file_locations_panel )
         self._rebalance_status_st.setAlignment( QC.Qt.AlignRight | QC.Qt.AlignVCenter )
         
-        self._rebalance_button = ClientGUICommon.BetterButton( info_panel, 'move files now', self._Rebalance )
+        self._rebalance_button = ClientGUICommon.BetterButton( file_locations_panel, 'move files now', self._Rebalance )
         
         #
         
-        migration_panel = ClientGUICommon.StaticBox( self, 'migrate entire database' )
+        migration_panel = ClientGUICommon.StaticBox( self, 'migrate database files (and portable media file locations)' )
         
         self._migrate_db_button = ClientGUICommon.BetterButton( migration_panel, 'move entire database and all portable paths', self._MigrateDatabase )
         
         #
         
+        info_panel.Add( self._current_install_path_st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        info_panel.Add( self._current_db_path_st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        info_panel.Add( self._current_media_paths_st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        
         t_hbox = QP.HBoxLayout()
         
-        QP.AddToLayout( t_hbox, ClientGUICommon.BetterStaticText(info_panel,'thumbnail location override'), CC.FLAGS_CENTER_PERPENDICULAR )
+        QP.AddToLayout( t_hbox, ClientGUICommon.BetterStaticText( file_locations_panel, 'thumbnail location override' ), CC.FLAGS_CENTER_PERPENDICULAR )
         QP.AddToLayout( t_hbox, self._thumbnails_location, CC.FLAGS_CENTER_PERPENDICULAR_EXPAND_DEPTH )
         QP.AddToLayout( t_hbox, self._thumbnails_location_set, CC.FLAGS_CENTER_PERPENDICULAR )
         QP.AddToLayout( t_hbox, self._thumbnails_location_clear, CC.FLAGS_CENTER_PERPENDICULAR )
@@ -135,12 +142,9 @@ class MigrateDatabasePanel( ClientGUIScrolledPanels.ReviewPanel ):
         QP.AddToLayout( rebalance_hbox, self._rebalance_status_st, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( rebalance_hbox, self._rebalance_button, CC.FLAGS_CENTER_PERPENDICULAR )
         
-        info_panel.Add( self._current_install_path_st, CC.FLAGS_EXPAND_PERPENDICULAR )
-        info_panel.Add( self._current_db_path_st, CC.FLAGS_EXPAND_PERPENDICULAR )
-        info_panel.Add( self._current_media_paths_st, CC.FLAGS_EXPAND_PERPENDICULAR )
-        info_panel.Add( current_media_locations_listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
-        info_panel.Add( t_hbox, CC.FLAGS_EXPAND_PERPENDICULAR )
-        info_panel.Add( rebalance_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        file_locations_panel.Add( current_media_locations_listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        file_locations_panel.Add( t_hbox, CC.FLAGS_EXPAND_PERPENDICULAR )
+        file_locations_panel.Add( rebalance_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
         #
         
@@ -150,8 +154,16 @@ class MigrateDatabasePanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         vbox = QP.VBoxLayout()
         
+        message = 'THIS IS ADVANCED. DO NOT CHANGE ANYTHING HERE UNLESS YOU KNOW WHAT IT DOES!'
+        
+        warning_st = ClientGUICommon.BetterStaticText( self, label = message )
+        
+        warning_st.setObjectName( 'HydrusWarning' )
+        
+        QP.AddToLayout( vbox, warning_st, CC.FLAGS_CENTER )
         QP.AddToLayout( vbox, help_hbox, CC.FLAGS_ON_RIGHT )
-        QP.AddToLayout( vbox, info_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( vbox, info_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, file_locations_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( vbox, migration_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         self.widget().setLayout( vbox )
@@ -484,7 +496,7 @@ class MigrateDatabasePanel( ClientGUIScrolledPanels.ReviewPanel ):
             
         
         display_tuple = ( pretty_location, pretty_portable, pretty_free_space, pretty_current_usage, pretty_ideal_weight, pretty_ideal_usage )
-        sort_tuple = ( location, portable, free_space, current_usage, ideal_weight, ideal_usage )
+        sort_tuple = ( location, portable, free_space, ideal_weight, ideal_usage, current_usage )
         
         return ( display_tuple, sort_tuple )
         
@@ -872,7 +884,7 @@ def THREADMigrateDatabase( controller, source, portable_locations, dest ):
     
     def qt_code( job_key ):
         
-        HG.client_controller.CallLaterQtSafe( controller.gui, 3.0, controller.Exit )
+        HG.client_controller.CallLaterQtSafe( controller.gui, 3.0, 'close program', controller.Exit )
         
         # no parent because this has to outlive the gui, obvs
         
@@ -890,7 +902,7 @@ def THREADMigrateDatabase( controller, source, portable_locations, dest ):
     
     job_key = ClientThreading.JobKey( cancel_on_shutdown = False )
     
-    job_key.SetVariable( 'popup_title', 'migrating database' )
+    job_key.SetStatusTitle( 'migrating database' )
     
     QP.CallAfter( qt_code, job_key )
     
@@ -2235,7 +2247,11 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         page_key = HydrusData.GenerateKey()
         
-        file_search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY )
+        default_local_file_service_key = HG.client_controller.services_manager.GetDefaultLocalFileServiceKey()
+        
+        location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ default_local_file_service_key ] )
+        
+        file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context )
         
         self._tag_autocomplete = ClientGUIACDropdown.AutoCompleteDropdownTagsRead( self._search_panel, page_key, file_search_context, allow_all_known_files = False, force_system_everything = True )
         
@@ -2528,7 +2544,9 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._select_repo_files.setEnabled( False )
         
-        file_search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_UPDATE_SERVICE_KEY )
+        location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ CC.LOCAL_UPDATE_SERVICE_KEY ] )
+        
+        file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context )
         
         HG.client_controller.CallToThread( do_it, file_search_context )
         
@@ -3257,13 +3275,70 @@ class ReviewLocalFileImports( ClientGUIScrolledPanels.ReviewPanel ):
             
         
     
-class ReviewThreads( ClientGUIScrolledPanels.ReviewPanel ):
+class JobSchedulerPanel( QW.QWidget ):
+    
+    def __init__( self, parent, controller, scheduler_name ):
+        
+        self._controller = controller
+        self._scheduler_name = scheduler_name
+        
+        QW.QWidget.__init__( self, parent )
+        
+        self._list_ctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
+        
+        self._list_ctrl = ClientGUIListCtrl.BetterListCtrl( self._list_ctrl_panel, CGLC.COLUMN_LIST_JOB_SCHEDULER_REVIEW.ID, 20, self._ConvertDataToListCtrlTuples )
+        
+        self._list_ctrl_panel.SetListCtrl( self._list_ctrl )
+        
+        # maybe some buttons to control behaviour here for debug
+        
+        self._list_ctrl_panel.AddButton( 'refresh snapshot', self._RefreshSnapshot )
+        
+        #
+        
+        self._list_ctrl.Sort()
+        
+        self._RefreshSnapshot()
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, self._list_ctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self.setLayout( vbox )
+        
+    
+    def _ConvertDataToListCtrlTuples( self, job: HydrusThreading.SchedulableJob ):
+        
+        job_type = job.PRETTY_CLASS_NAME
+        job_call = job.GetPrettyJob()
+        due = job.GetNextWorkTime()
+        
+        pretty_job_type = job_type
+        pretty_job_call = job_call
+        pretty_due = job.GetDueString()
+        
+        display_tuple = ( pretty_job_type, pretty_job_call, pretty_due )
+        sort_tuple = ( job_type, job_call, due )
+        
+        return ( display_tuple, sort_tuple )
+        
+    
+    def _RefreshSnapshot( self ):
+        
+        jobs = self._controller.GetJobSchedulerSnapshot( self._scheduler_name )
+        
+        self._list_ctrl.SetData( jobs )
+        
+    
+class ThreadsPanel( QW.QWidget ):
     
     def __init__( self, parent, controller ):
         
         self._controller = controller
         
-        ClientGUIScrolledPanels.ReviewPanel.__init__( self, parent )
+        QW.QWidget.__init__( self, parent )
         
         self._list_ctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
         
@@ -3287,7 +3362,7 @@ class ReviewThreads( ClientGUIScrolledPanels.ReviewPanel ):
         
         QP.AddToLayout( vbox, self._list_ctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         
-        self.widget().setLayout( vbox )
+        self.setLayout( vbox )
         
     
     def _ConvertDataToListCtrlTuples( self, thread ):
@@ -3311,5 +3386,30 @@ class ReviewThreads( ClientGUIScrolledPanels.ReviewPanel ):
         threads = self._controller.GetThreadsSnapshot()
         
         self._list_ctrl.SetData( threads )
+        
+    
+class ReviewThreads( ClientGUIScrolledPanels.ReviewPanel ):
+    
+    def __init__( self, parent, controller ):
+        
+        ClientGUIScrolledPanels.ReviewPanel.__init__( self, parent )
+        
+        self._notebook = ClientGUICommon.BetterNotebook( self )
+        
+        self._thread_panel = ThreadsPanel( self._notebook, controller )
+        
+        self._fast_scheduler_panel = JobSchedulerPanel( self._notebook, controller, 'fast' )
+        
+        self._slow_scheduler_panel = JobSchedulerPanel( self._notebook, controller, 'slow' )
+        
+        self._notebook.addTab( self._thread_panel, 'threads' )
+        self._notebook.addTab( self._fast_scheduler_panel, 'fast scheduler' )
+        self._notebook.addTab( self._slow_scheduler_panel, 'slow scheduler' )
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, self._notebook, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self.widget().setLayout( vbox )
         
     

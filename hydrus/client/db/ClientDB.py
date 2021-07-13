@@ -21,7 +21,6 @@ from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core.networking import HydrusNetwork
-from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientAPI
 from hydrus.client import ClientApplicationCommand as CAC
@@ -40,7 +39,7 @@ from hydrus.client.db import ClientDBMaster
 from hydrus.client.db import ClientDBSerialisable
 from hydrus.client.db import ClientDBServices
 from hydrus.client.db import ClientDBSimilarFiles
-from hydrus.client.importing import ClientImportFileSeeds
+from hydrus.client.importing import ClientImportFiles
 from hydrus.client.media import ClientMedia
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
@@ -48,7 +47,6 @@ from hydrus.client.media import ClientMediaResultCache
 from hydrus.client.metadata import ClientTags
 from hydrus.client.metadata import ClientTagsHandling
 from hydrus.client.networking import ClientNetworkingBandwidth
-from hydrus.client.networking import ClientNetworkingContexts
 from hydrus.client.networking import ClientNetworkingDomain
 from hydrus.client.networking import ClientNetworkingLogin
 from hydrus.client.networking import ClientNetworkingSessions
@@ -725,7 +723,7 @@ class DB( HydrusDB.HydrusDB ):
             
             try:
                 
-                job_key.SetVariable( 'popup_title', 'database maintenance - analyzing' )
+                job_key.SetStatusTitle( 'database maintenance - analyzing' )
                 
                 self._controller.pub( 'modal_message', job_key )
                 
@@ -850,7 +848,7 @@ class DB( HydrusDB.HydrusDB ):
             
             job_key = ClientThreading.JobKey( cancellable = True )
             
-            job_key.SetVariable( 'popup_title', 'backing up db' )
+            job_key.SetStatusTitle( 'backing up db' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -1561,7 +1559,7 @@ class DB( HydrusDB.HydrusDB ):
         
         if result is None:
             
-            self._HandleCriticalRepositoryDefinitionError( service_id )
+            self._HandleCriticalRepositoryDefinitionError( service_id, 'hash_id', service_hash_id )
             
         
         ( hash_id, ) = result
@@ -1576,13 +1574,28 @@ class DB( HydrusDB.HydrusDB ):
         with HydrusDB.TemporaryIntegerTable( self._c, service_hash_ids, 'service_hash_id' ) as temp_table_name:
             
             # temp service hashes to lookup
-            hash_ids = self._STS( self._c.execute( 'SELECT hash_id FROM {} CROSS JOIN {} USING ( service_hash_id );'.format( temp_table_name, hash_id_map_table_name ) ) )
+            hash_ids_potentially_dupes = self._STL( self._c.execute( 'SELECT hash_id FROM {} CROSS JOIN {} USING ( service_hash_id );'.format( temp_table_name, hash_id_map_table_name ) ) )
             
         
-        if len( hash_ids ) != len( service_hash_ids ):
+        # every service_id can only exist once, but technically a hash_id could be mapped to two service_ids
+        if len( hash_ids_potentially_dupes ) != len( service_hash_ids ):
             
-            self._HandleCriticalRepositoryDefinitionError( service_id )
+            bad_service_hash_ids = []
             
+            for service_hash_id in service_hash_ids:
+                
+                result = self._c.execute( 'SELECT hash_id FROM {} WHERE service_hash_id = ?;'.format( hash_id_map_table_name ), ( service_hash_id, ) ).fetchone()
+                
+                if result is None:
+                    
+                    bad_service_hash_ids.append( service_hash_id )
+                    
+                
+            
+            self._HandleCriticalRepositoryDefinitionError( service_id, 'hash_ids', bad_service_hash_ids )
+            
+        
+        hash_ids = set( hash_ids_potentially_dupes )
         
         return hash_ids
         
@@ -1591,11 +1604,11 @@ class DB( HydrusDB.HydrusDB ):
         
         ( hash_id_map_table_name, tag_id_map_table_name ) = GenerateRepositoryMasterCacheTableNames( service_id )
         
-        result = self._c.execute( 'SELECT tag_id FROM ' + tag_id_map_table_name + ' WHERE service_tag_id = ?;', ( service_tag_id, ) ).fetchone()
+        result = self._c.execute( 'SELECT tag_id FROM {} WHERE service_tag_id = ?;'.format( tag_id_map_table_name ), ( service_tag_id, ) ).fetchone()
         
         if result is None:
             
-            self._HandleCriticalRepositoryDefinitionError( service_id )
+            self._HandleCriticalRepositoryDefinitionError( service_id, 'tag_id', service_tag_id )
             
         
         ( tag_id, ) = result
@@ -2751,32 +2764,30 @@ class DB( HydrusDB.HydrusDB ):
         return set( self._CacheTagSiblingsGetApplicableServiceIds( tag_service_id ) ).union( self._CacheTagParentsGetApplicableServiceIds( tag_service_id ) )
         
     
-    def _CacheTagDisplayGetChainMembers( self, display_type, tag_service_id, tag_id ):
-        
-        # all parent definitions are sibling collapsed, so are terminus of their sibling chains
-        # so get all of the parent chain, then get all chains that point to those
-        
-        ideal_tag_id = self._CacheTagSiblingsGetIdeal( display_type, tag_service_id, tag_id )
-        
-        parent_chain_members = self._CacheTagParentsGetChainsMembers( display_type, tag_service_id, ( ideal_tag_id, ) )
-        
-        complete_chain_members = self._CacheTagSiblingsGetChainsMembersFromIdeals( display_type, tag_service_id, parent_chain_members )
-        
-        return complete_chain_members
-        
-    
     def _CacheTagDisplayGetChainsMembers( self, display_type, tag_service_id, tag_ids ):
         
         # all parent definitions are sibling collapsed, so are terminus of their sibling chains
         # so get all of the parent chain, then get all chains that point to those
         
-        ideal_tag_ids = self._CacheTagSiblingsGetIdeals( display_type, tag_service_id, tag_ids )
-        
-        parent_chain_members = self._CacheTagParentsGetChainsMembers( display_type, tag_service_id, ideal_tag_ids )
-        
-        complete_chain_members = self._CacheTagSiblingsGetChainsMembersFromIdeals( display_type, tag_service_id, parent_chain_members )
-        
-        return complete_chain_members
+        with HydrusDB.TemporaryIntegerTable( self._c, tag_ids, 'tag_id' ) as temp_tag_ids_table_name:
+            
+            with HydrusDB.TemporaryIntegerTable( self._c, [], 'ideal_tag_id' ) as temp_ideal_tag_ids_table_name:
+                
+                self._CacheTagSiblingsGetIdealsIntoTable( display_type, tag_service_id, temp_tag_ids_table_name, temp_ideal_tag_ids_table_name )
+                
+                with HydrusDB.TemporaryIntegerTable( self._c, [], 'tag_id' ) as temp_parent_chain_members_table_name:
+                    
+                    self._CacheTagParentsGetChainsMembersTables( display_type, tag_service_id, temp_ideal_tag_ids_table_name, temp_parent_chain_members_table_name )
+                    
+                    with HydrusDB.TemporaryIntegerTable( self._c, [], 'tag_id' ) as temp_chain_members_table_name:
+                        
+                        self._CacheTagSiblingsGetChainsMembersFromIdealsTables( display_type, tag_service_id, temp_parent_chain_members_table_name, temp_chain_members_table_name )
+                        
+                        return self._STS( self._c.execute( 'SELECT tag_id FROM {};'.format( temp_chain_members_table_name ) ) )
+                        
+                    
+                
+            
         
     
     def _CacheTagDisplayGetImpliedBy( self, display_type, tag_service_id, tag_id ):
@@ -3628,20 +3639,6 @@ class DB( HydrusDB.HydrusDB ):
         return self._service_ids_to_parent_applicable_service_ids[ tag_service_id ]
         
     
-    def _CacheTagParentsGetChainMembers( self, display_type: int, tag_service_id: int, ideal_tag_id: int ):
-        
-        cache_tag_parents_lookup_table_name = GenerateTagParentsLookupCacheTableName( display_type, tag_service_id )
-        
-        chain_ids = self._STS( self._c.execute( 'SELECT child_tag_id FROM {} WHERE ancestor_tag_id = ? UNION ALL SELECT ancestor_tag_id FROM {} WHERE child_tag_id = ?;'.format( cache_tag_parents_lookup_table_name, cache_tag_parents_lookup_table_name ), ( ideal_tag_id, ideal_tag_id ) ) )
-        
-        if len( chain_ids ) == 0:
-            
-            chain_ids = { ideal_tag_id }
-            
-        
-        return chain_ids
-        
-    
     def _CacheTagParentsGetChainsMembers( self, display_type: int, tag_service_id: int, ideal_tag_ids: typing.Collection[ int ] ):
         
         if len( ideal_tag_ids ) == 0:
@@ -3679,6 +3676,49 @@ class DB( HydrusDB.HydrusDB ):
             
         
         return chain_tag_ids
+        
+    
+    def _CacheTagParentsGetChainsMembersTables( self, display_type: int, tag_service_id: int, ideal_tag_ids_table_name: str, results_table_name: str ):
+        
+        # if it isn't crazy, I should write this whole lad to be one or two recursive queries
+        
+        cache_tag_parents_lookup_table_name = GenerateTagParentsLookupCacheTableName( display_type, tag_service_id )
+        
+        first_ideal_tag_ids = self._STS( self._c.execute( 'SELECT ideal_tag_id FROM {};'.format( ideal_tag_ids_table_name ) ) )
+        
+        chain_tag_ids = set( first_ideal_tag_ids )
+        we_have_looked_up = set()
+        next_search_tag_ids = set( first_ideal_tag_ids )
+        
+        while len( next_search_tag_ids ) > 0:
+            
+            if len( next_search_tag_ids ) == 1:
+                
+                ( ideal_tag_id, ) = next_search_tag_ids
+                
+                round_of_tag_ids = self._STS( self._c.execute( 'SELECT child_tag_id FROM {} WHERE ancestor_tag_id = ? UNION ALL SELECT ancestor_tag_id FROM {} WHERE child_tag_id = ?;'.format( cache_tag_parents_lookup_table_name, cache_tag_parents_lookup_table_name ), ( ideal_tag_id, ideal_tag_id ) ) )
+                
+            else:
+                
+                with HydrusDB.TemporaryIntegerTable( self._c, next_search_tag_ids, 'tag_id' ) as temp_next_search_tag_ids_table_name:
+                    
+                    round_of_tag_ids = self._STS( self._c.execute( 'SELECT child_tag_id FROM {} CROSS JOIN {} ON ( ancestor_tag_id = tag_id ) UNION ALL SELECT ancestor_tag_id FROM {} CROSS JOIN {} ON ( child_tag_id = tag_id );'.format( temp_next_search_tag_ids_table_name, cache_tag_parents_lookup_table_name, temp_next_search_tag_ids_table_name, cache_tag_parents_lookup_table_name ) ) )
+                    
+                
+            
+            new_tag_ids = round_of_tag_ids.difference( chain_tag_ids )
+            
+            if len( new_tag_ids ) > 0:
+                
+                self._c.executemany( 'INSERT OR IGNORE INTO {} ( tag_id ) VALUES ( ? );', ( ( tag_id, ) for tag_id in round_of_tag_ids.difference( new_tag_ids ) ) )
+                
+                chain_tag_ids.update( new_tag_ids )
+                
+            
+            we_have_looked_up.update( next_search_tag_ids )
+            
+            next_search_tag_ids = round_of_tag_ids.difference( we_have_looked_up )
+            
         
     
     def _CacheTagParentsGetDescendants( self, display_type: int, tag_service_id: int, ideal_tag_id: int ):
@@ -3788,7 +3828,7 @@ class DB( HydrusDB.HydrusDB ):
         
         cache_tag_parents_lookup_table_name = GenerateTagParentsLookupCacheTableName( display_type, tag_service_id )
         
-        return self._c.execute( 'SELECT 1 FROM {} WHERE ( child_tag_id = ? OR ancestor_tag_id = ? ) AND child_tag_id != ancestor_tag_id;'.format( cache_tag_parents_lookup_table_name ), ( ideal_tag_id, ideal_tag_id ) ).fetchone() is not None
+        return self._c.execute( 'SELECT 1 FROM {} WHERE child_tag_id = ? OR ancestor_tag_id = ?;'.format( cache_tag_parents_lookup_table_name ), ( ideal_tag_id, ideal_tag_id ) ).fetchone() is not None
         
     
     def _CacheTagParentsRegen( self, tag_service_ids ):
@@ -4397,6 +4437,32 @@ class DB( HydrusDB.HydrusDB ):
         return chain_tag_ids
         
     
+    def _CacheTagSiblingsFilterChainedIdealsIntoTable( self, display_type, tag_service_id, tag_ids_table_name, results_table_name ):
+        
+        # get the tag_ids that are part of a sibling chain
+        
+        cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( display_type, tag_service_id )
+        
+        # keep these separate--older sqlite can't do cross join to an OR ON
+        
+        # temp tags to lookup
+        self._c.execute( 'INSERT OR IGNORE INTO {} SELECT ideal_tag_id FROM {} CROSS JOIN {} ON ( bad_tag_id = tag_id );'.format( results_table_name, tag_ids_table_name, cache_tag_siblings_lookup_table_name ) )
+        self._STI( self._c.execute( 'INSERT OR IGNORE INTO {} SELECT tag_id FROM {} CROSS JOIN {} ON ( ideal_tag_id = tag_id );'.format( results_table_name, tag_ids_table_name, cache_tag_siblings_lookup_table_name ) ) )
+        
+    
+    def _CacheTagSiblingsFilterChainedIntoTable( self, display_type, tag_service_id, tag_ids_table_name, results_table_name ):
+        
+        # get the tag_ids that are part of a sibling chain
+        
+        cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( display_type, tag_service_id )
+        
+        # keep these separate--older sqlite can't do cross join to an OR ON
+        
+        # temp tags to lookup
+        self._c.execute( 'INSERT OR IGNORE INTO {} SELECT tag_id FROM {} CROSS JOIN {} ON ( bad_tag_id = tag_id );'.format( results_table_name, tag_ids_table_name, cache_tag_siblings_lookup_table_name ) )
+        self._STI( self._c.execute( 'INSERT OR IGNORE INTO {} SELECT tag_id FROM {} CROSS JOIN {} ON ( ideal_tag_id = tag_id );'.format( results_table_name, tag_ids_table_name, cache_tag_siblings_lookup_table_name ) ) )
+        
+    
     def _CacheTagSiblingsGenerate( self, tag_service_id ):
         
         ( cache_ideal_tag_siblings_lookup_table_name, cache_actual_tag_siblings_lookup_table_name ) = GenerateTagSiblingsLookupCacheTableNames( tag_service_id )
@@ -4469,6 +4535,16 @@ class DB( HydrusDB.HydrusDB ):
         return sibling_tag_ids
         
     
+    def _CacheTagSiblingsGetChainsMembersFromIdealsTables( self, display_type, tag_service_id, ideal_tag_ids_table_name, results_table_name ) -> typing.Set[ int ]:
+        
+        cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( display_type, tag_service_id )
+        
+        self._c.execute( 'INSERT OR IGNORE INTO {} ( tag_id ) SELECT ideal_tag_id FROM {};'.format( results_table_name, ideal_tag_ids_table_name ) )
+        
+        # tags to lookup
+        self._c.execute( 'INSERT OR IGNORE INTO {} ( tag_id ) SELECT bad_tag_id FROM {} CROSS JOIN {} USING ( ideal_tag_id );'.format( results_table_name, ideal_tag_ids_table_name, cache_tag_siblings_lookup_table_name ) )
+        
+    
     def _CacheTagSiblingsGetApplicableServiceIds( self, tag_service_id ):
         
         if self._service_ids_to_sibling_applicable_service_ids is None:
@@ -4517,6 +4593,22 @@ class DB( HydrusDB.HydrusDB ):
         
         cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( display_type, tag_service_id )
         
+        with HydrusDB.TemporaryIntegerTable( self._c, tag_ids, 'tag_id' ) as temp_tag_ids_table_name:
+            
+            magic_case = 'CASE WHEN ideal_tag_id NOT NULL THEN ideal_tag_id ELSE tag_id END'
+            
+            cursor = self._c.execute(
+                'SELECT {} FROM {} LEFT OUTER JOIN {} ON ( tag_id = bad_tag_id );'.format(
+                    magic_case,
+                    temp_tag_ids_table_name,
+                    cache_tag_siblings_lookup_table_name
+                )
+            )
+            
+            return self._STS( cursor )
+            
+        
+        '''
         no_ideal_found_tag_ids = set( tag_ids )
         ideal_tag_ids = set()
         
@@ -4533,6 +4625,25 @@ class DB( HydrusDB.HydrusDB ):
             
         
         return ideal_tag_ids
+        '''
+        
+    
+    def _CacheTagSiblingsGetIdealsIntoTable( self, display_type, tag_service_id, tag_ids_table_name, results_table_name ):
+        
+        cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( display_type, tag_service_id )
+        
+        magic_case = 'CASE WHEN ideal_tag_id NOT NULL THEN ideal_tag_id ELSE tag_id END'
+        
+        cursor = self._c.execute(
+            'INSERT OR IGNORE INTO {} ( ideal_tag_id ) SELECT {} FROM {} LEFT OUTER JOIN {} ON ( tag_id = bad_tag_id );'.format(
+                results_table_name,
+                magic_case,
+                tag_ids_table_name,
+                cache_tag_siblings_lookup_table_name
+            )
+        )
+        
+        return self._STS( cursor )
         
     
     def _CacheTagSiblingsGetIdealsToChains( self, display_type, tag_service_id, ideal_tag_ids ):
@@ -4690,7 +4801,7 @@ class DB( HydrusDB.HydrusDB ):
         
         cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( display_type, tag_service_id )
         
-        return self._c.execute( 'SELECT 1 FROM {} WHERE ( bad_tag_id = ? OR ideal_tag_id = ? ) AND bad_tag_id != ideal_tag_id;'.format( cache_tag_siblings_lookup_table_name ), ( tag_id, tag_id ) ).fetchone() is not None
+        return self._c.execute( 'SELECT 1 FROM {} WHERE bad_tag_id = ? OR ideal_tag_id = ?;'.format( cache_tag_siblings_lookup_table_name ), ( tag_id, tag_id ) ).fetchone() is not None
         
     
     def _CacheTagSiblingsRegen( self, tag_service_ids ):
@@ -4818,13 +4929,13 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', prefix_string + 'preparing' )
+            job_key.SetStatusTitle( prefix_string + 'preparing' )
             
             self._controller.pub( 'modal_message', job_key )
             
             num_errors = 0
             
-            job_key.SetVariable( 'popup_title', prefix_string + 'running' )
+            job_key.SetStatusTitle( prefix_string + 'running' )
             job_key.SetVariable( 'popup_text_1', 'errors found so far: ' + HydrusData.ToHumanInt( num_errors ) )
             
             db_names = [ name for ( index, name, path ) in self._c.execute( 'PRAGMA database_list;' ) if name not in ( 'mem', 'temp', 'durable_temp' ) ]
@@ -4837,7 +4948,7 @@ class DB( HydrusDB.HydrusDB ):
                     
                     if should_quit:
                         
-                        job_key.SetVariable( 'popup_title', prefix_string + 'cancelled' )
+                        job_key.SetStatusTitle( prefix_string + 'cancelled' )
                         job_key.SetVariable( 'popup_text_1', 'errors found: ' + HydrusData.ToHumanInt( num_errors ) )
                         
                         return
@@ -4861,7 +4972,7 @@ class DB( HydrusDB.HydrusDB ):
             
         finally:
             
-            job_key.SetVariable( 'popup_title', prefix_string + 'completed' )
+            job_key.SetStatusTitle( prefix_string + 'completed' )
             job_key.SetVariable( 'popup_text_1', 'errors found: ' + HydrusData.ToHumanInt( num_errors ) )
             
             HydrusData.Print( job_key.ToString() )
@@ -4883,7 +4994,7 @@ class DB( HydrusDB.HydrusDB ):
         
         job_key = ClientThreading.JobKey( cancellable = True )
         
-        job_key.SetVariable( 'popup_title', 'clear orphan file records' )
+        job_key.SetStatusTitle( 'clear orphan file records' )
         
         self._controller.pub( 'modal_message', job_key )
         
@@ -5369,7 +5480,7 @@ class DB( HydrusDB.HydrusDB ):
         
         now = HydrusData.GetNow()
         
-        if service.GetServiceKey() != CC.TRASH_SERVICE_KEY:
+        if service_id != self.modules_services.trash_service_id:
             
             if only_if_current:
                 
@@ -7430,6 +7541,8 @@ class DB( HydrusDB.HydrusDB ):
                 
                 if job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA:
                     
+                    ( original_mr, ) = self._GetMediaResults( ( hash_id, ) )
+                    
                     ( size, mime, width, height, duration, num_frames, has_audio, num_words ) = additional_data
                     
                     files_rows = [ ( hash_id, size, mime, width, height, duration, num_frames, has_audio, num_words ) ]
@@ -7450,6 +7563,14 @@ class DB( HydrusDB.HydrusDB ):
                         if result is None:
                             
                             self._FileMaintenanceAddJobs( { hash_id }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP )
+                            
+                        
+                    
+                    if mime in HC.MIMES_WITH_THUMBNAILS:
+                        
+                        if original_mr.GetResolution() != ( width, height ):
+                            
+                            self._FileMaintenanceAddJobs( { hash_id }, ClientFiles.REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL )
                             
                         
                     
@@ -7695,6 +7816,23 @@ class DB( HydrusDB.HydrusDB ):
         return culled_mappings_ids
         
     
+    def _FilterForFileDeleteLock( self, service_id, hash_ids ):
+        
+        # eventually extend this to the metadata conditional object
+        
+        if HG.client_controller.new_options.GetBoolean( 'delete_lock_for_archived_files' ):
+            
+            service = self.modules_services.GetService( service_id )
+            
+            if service.GetServiceType() in HC.LOCAL_FILE_SERVICES:
+                
+                hash_ids = set( hash_ids ).intersection( self.modules_files_metadata_basic.inbox_hash_ids )
+                
+            
+        
+        return hash_ids
+        
+    
     def _FilterHashesByService( self, file_service_key: bytes, hashes: typing.Sequence[ bytes ] ) -> typing.List[ bytes ]:
         
         # returns hashes in order, to be nice to UI
@@ -7735,7 +7873,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'fixing logically inconsistent mappings' )
+            job_key.SetStatusTitle( 'fixing logically inconsistent mappings' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -8283,15 +8421,21 @@ class DB( HydrusDB.HydrusDB ):
             
         else:
             
-            subtag_ids = self._GetSubtagIdsFromWildcard( file_service_id, tag_service_id, half_complete_searchable_subtag, job_key = job_key )
-            
-            if namespace == '':
+            with HydrusDB.TemporaryIntegerTable( self._c, [], 'subtag_id' ) as temp_subtag_ids_table_name:
                 
-                tag_ids = self._GetTagIdsFromSubtagIds( file_service_id, tag_service_id, subtag_ids, job_key = job_key )
+                self._GetSubtagIdsFromWildcardIntoTable( file_service_id, tag_service_id, half_complete_searchable_subtag, temp_subtag_ids_table_name, job_key = job_key )
                 
-            else:
-                
-                tag_ids = self._GetTagIdsFromNamespaceIdsSubtagIds( file_service_id, tag_service_id, namespace_ids, subtag_ids, job_key = job_key )
+                if namespace == '':
+                    
+                    tag_ids = self._GetTagIdsFromSubtagIdsTable( file_service_id, tag_service_id, temp_subtag_ids_table_name, job_key = job_key )
+                    
+                else:
+                    
+                    with HydrusDB.TemporaryIntegerTable( self._c, namespace_ids, 'namespace_id' ) as temp_namespace_ids_table_name:
+                        
+                        tag_ids = self._GetTagIdsFromNamespaceIdsSubtagIdsTables( file_service_id, tag_service_id, temp_namespace_ids_table_name, temp_subtag_ids_table_name, job_key = job_key )
+                        
+                    
                 
             
         
@@ -8313,11 +8457,39 @@ class DB( HydrusDB.HydrusDB ):
         
         tag_ids_without_siblings = list( tag_ids )
         
-        for sibling_tag_service_id in sibling_tag_service_ids:
+        seen_ideal_tag_ids = collections.defaultdict( set )
+        
+        for batch_of_tag_ids in HydrusData.SplitListIntoChunks( tag_ids_without_siblings, 10240 ):
             
-            seen_ideal_tag_ids = set()
+            with HydrusDB.TemporaryIntegerTable( self._c, batch_of_tag_ids, 'tag_id' ) as temp_tag_ids_table_name:
+                
+                for sibling_tag_service_id in sibling_tag_service_ids:
+                    
+                    if job_key is not None and job_key.IsCancelled():
+                        
+                        return set()
+                        
+                    
+                    with HydrusDB.TemporaryIntegerTable( self._c, [], 'ideal_tag_id' ) as temp_ideal_tag_ids_table_name:
+                        
+                        self._CacheTagSiblingsFilterChainedIdealsIntoTable( ClientTags.TAG_DISPLAY_ACTUAL, sibling_tag_service_id, temp_tag_ids_table_name, temp_ideal_tag_ids_table_name )
+                        
+                        with HydrusDB.TemporaryIntegerTable( self._c, [], 'tag_id' ) as temp_chained_tag_ids_table_name:
+                            
+                            self._CacheTagSiblingsGetChainsMembersFromIdealsTables( ClientTags.TAG_DISPLAY_ACTUAL, sibling_tag_service_id, temp_ideal_tag_ids_table_name, temp_chained_tag_ids_table_name )
+                            
+                            tag_ids.update( self._STI( self._c.execute( 'SELECT tag_id FROM {};'.format( temp_chained_tag_ids_table_name ) ) ) )
+                            
+                        
+                    
+                    
+                
             
-            for batch_of_tag_ids in HydrusData.SplitListIntoChunks( tag_ids_without_siblings, 10240 ):
+        
+        '''
+        for batch_of_tag_ids in HydrusData.SplitListIntoChunks( tag_ids_without_siblings, 10240 ):
+            
+            for sibling_tag_service_id in sibling_tag_service_ids:
                 
                 if job_key is not None and job_key.IsCancelled():
                     
@@ -8326,12 +8498,13 @@ class DB( HydrusDB.HydrusDB ):
                 
                 ideal_tag_ids = self._CacheTagSiblingsGetIdeals( ClientTags.TAG_DISPLAY_ACTUAL, sibling_tag_service_id, batch_of_tag_ids )
                 
-                ideal_tag_ids.difference_update( seen_ideal_tag_ids )
-                seen_ideal_tag_ids.update( ideal_tag_ids )
+                ideal_tag_ids.difference_update( seen_ideal_tag_ids[ sibling_tag_service_id ] )
+                seen_ideal_tag_ids[ sibling_tag_service_id ].update( ideal_tag_ids )
                 
                 tag_ids.update( self._CacheTagSiblingsGetChainsMembersFromIdeals( ClientTags.TAG_DISPLAY_ACTUAL, sibling_tag_service_id, ideal_tag_ids ) )
                 
             
+        '''
         
         return tag_ids
         
@@ -8514,8 +8687,8 @@ class DB( HydrusDB.HydrusDB ):
         
         boned_stats = {}
         
-        ( num_total, size_total ) = self._c.execute( 'SELECT COUNT( hash_id ), SUM( size ) FROM files_info NATURAL JOIN current_files WHERE service_id = ?;', ( self.modules_services.local_file_service_id, ) ).fetchone()
-        ( num_inbox, size_inbox ) = self._c.execute( 'SELECT COUNT( hash_id ), SUM( size ) FROM files_info NATURAL JOIN current_files NATURAL JOIN file_inbox WHERE service_id = ?;', ( self.modules_services.local_file_service_id, ) ).fetchone()
+        ( num_total, size_total ) = self._c.execute( 'SELECT COUNT( hash_id ), SUM( size ) FROM files_info NATURAL JOIN current_files WHERE service_id = ?;', ( self.modules_services.combined_local_file_service_id, ) ).fetchone()
+        ( num_inbox, size_inbox ) = self._c.execute( 'SELECT COUNT( hash_id ), SUM( size ) FROM files_info NATURAL JOIN current_files NATURAL JOIN file_inbox WHERE service_id = ?;', ( self.modules_services.combined_local_file_service_id, ) ).fetchone()
         
         if size_total is None:
             
@@ -8556,7 +8729,7 @@ class DB( HydrusDB.HydrusDB ):
         total_alternate_files = sum( ( count for ( alternates_group_id, count ) in self._c.execute( 'SELECT alternates_group_id, COUNT( * ) FROM alternate_file_group_members GROUP BY alternates_group_id;' ) if count > 1 ) )
         total_duplicate_files = sum( ( count for ( media_id, count ) in self._c.execute( 'SELECT media_id, COUNT( * ) FROM duplicate_file_members GROUP BY media_id;' ) if count > 1 ) )
         
-        ( table_join, predicates_string ) = self._DuplicatesGetPotentialDuplicatePairsTableJoinInfoOnFileService( CC.LOCAL_FILE_SERVICE_KEY )
+        ( table_join, predicates_string ) = self._DuplicatesGetPotentialDuplicatePairsTableJoinInfoOnFileService( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
         
         ( total_potential_pairs, ) = self._c.execute( 'SELECT COUNT( * ) FROM ( SELECT DISTINCT smaller_media_id, larger_media_id FROM {} WHERE {} );'.format( table_join, predicates_string ) ).fetchone()
         
@@ -8992,6 +9165,16 @@ class DB( HydrusDB.HydrusDB ):
         return self._GetHashIdsFromTagIds( tag_display_type, file_service_key, tag_search_context, tag_ids, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
         
     
+    def _GetHashIdsFromNamespaceIdsSubtagIdsTables( self, tag_display_type: int, file_service_key, tag_search_context: ClientSearch.TagSearchContext, namespace_ids_table_name, subtag_ids_table_name, hash_ids = None, hash_ids_table_name = None, job_key = None ):
+        
+        file_service_id = self.modules_services.GetServiceId( file_service_key )
+        tag_service_id = self.modules_services.GetServiceId( tag_search_context.service_key )
+        
+        tag_ids = self._GetTagIdsFromNamespaceIdsSubtagIdsTables( file_service_id, tag_service_id, namespace_ids_table_name, subtag_ids_table_name, job_key = job_key )
+        
+        return self._GetHashIdsFromTagIds( tag_display_type, file_service_key, tag_search_context, tag_ids, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
+        
+    
     def _GetHashIdsFromNoteName( self, name: str, hash_ids_table_name: str ):
         
         label_id = self.modules_texts.GetLabelId( name )
@@ -9063,6 +9246,7 @@ class DB( HydrusDB.HydrusDB ):
         system_predicates = file_search_context.GetSystemPredicates()
         
         file_service_key = file_search_context.GetFileServiceKey()
+        location_search_context = file_search_context.GetLocationSearchContext()
         tag_search_context = file_search_context.GetTagSearchContext()
         
         tag_service_key = tag_search_context.service_key
@@ -9070,16 +9254,48 @@ class DB( HydrusDB.HydrusDB ):
         include_current_tags = tag_search_context.include_current_tags
         include_pending_tags = tag_search_context.include_pending_tags
         
-        try:
-            
-            file_service_id = self.modules_services.GetServiceId( file_service_key )
-            
-        except HydrusExceptions.DataMissing:
-            
-            HydrusData.ShowText( 'A file search query was run for a file service that does not exist! If you just removed a service, you might want to try checking the search and/or restarting the client.' )
+        if not location_search_context.SearchesAnything():
             
             return set()
             
+        
+        current_file_service_ids = set()
+        
+        for current_service_key in location_search_context.current_service_keys:
+            
+            try:
+                
+                current_file_service_id = self.modules_services.GetServiceId( current_service_key )
+                
+            except HydrusExceptions.DataMissing:
+                
+                HydrusData.ShowText( 'A file search query was run for a file service that does not exist! If you just removed a service, you might want to try checking the search and/or restarting the client.' )
+                
+                return set()
+                
+            
+            current_file_service_ids.add( current_file_service_id )
+            
+        
+        deleted_file_service_ids = set()
+        
+        for deleted_service_key in location_search_context.deleted_service_keys:
+            
+            try:
+                
+                deleted_file_service_id = self.modules_services.GetServiceId( deleted_service_key )
+                
+            except HydrusExceptions.DataMissing:
+                
+                HydrusData.ShowText( 'A file search query was run for a file service that does not exist! If you just removed a service, you might want to try checking the search and/or restarting the client.' )
+                
+                return set()
+                
+            
+            deleted_file_service_ids.add( deleted_file_service_id )
+            
+        
+        file_service_id = self.modules_services.GetServiceId( file_service_key )
         
         try:
             
@@ -9111,7 +9327,7 @@ class DB( HydrusDB.HydrusDB ):
         
         or_predicates = file_search_context.GetORPredicates()
         
-        need_file_domain_cross_reference = file_service_key != CC.COMBINED_FILE_SERVICE_KEY
+        need_file_domain_cross_reference = not location_search_context.IsAllKnownFiles()
         there_are_tags_to_search = len( tags_to_include ) > 0 or len( namespaces_to_include ) > 0 or len( wildcards_to_include ) > 0
         
         # ok, let's set up the big list of simple search preds
@@ -9379,7 +9595,7 @@ class DB( HydrusDB.HydrusDB ):
         
         #
         
-        if file_service_key != CC.COMBINED_FILE_SERVICE_KEY:
+        if need_file_domain_cross_reference:
             
             import_timestamp_predicates = []
             
@@ -9665,7 +9881,7 @@ class DB( HydrusDB.HydrusDB ):
         
         if we_need_some_results or we_need_to_cross_reference:
             
-            if file_service_key == CC.COMBINED_FILE_SERVICE_KEY:
+            if location_search_context.IsAllKnownFiles():
                 
                 query_hash_ids = intersection_update_qhi( query_hash_ids, self._GetHashIdsThatHaveTags( ClientTags.TAG_DISPLAY_ACTUAL, file_service_key, tag_search_context, job_key = job_key ) )
                 
@@ -9748,7 +9964,7 @@ class DB( HydrusDB.HydrusDB ):
         
         # hide update files
         
-        if file_service_key == CC.COMBINED_LOCAL_FILE_SERVICE_KEY:
+        if location_search_context.IsAllLocalFiles():
             
             repo_update_hash_ids = self._STS( self._c.execute( 'SELECT hash_id FROM current_files WHERE service_id = ?;', ( self.modules_services.local_update_service_id, ) ) )
             
@@ -10193,6 +10409,16 @@ class DB( HydrusDB.HydrusDB ):
         return self._GetHashIdsFromTagIds( tag_display_type, file_service_key, tag_search_context, tag_ids, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
         
     
+    def _GetHashIdsFromSubtagIdsTable( self, tag_display_type: int, file_service_key, tag_search_context: ClientSearch.TagSearchContext, subtag_ids_table_name, hash_ids = None, hash_ids_table_name = None, job_key = None ):
+        
+        file_service_id = self.modules_services.GetServiceId( file_service_key )
+        tag_service_id = self.modules_services.GetServiceId( tag_search_context.service_key )
+        
+        tag_ids = self._GetTagIdsFromSubtagIdsTable( file_service_id, tag_service_id, subtag_ids_table_name, job_key = job_key )
+        
+        return self._GetHashIdsFromTagIds( tag_display_type, file_service_key, tag_search_context, tag_ids, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
+        
+    
     def _GetHashIdsFromTag( self, tag_display_type: int, file_service_key, tag_search_context: ClientSearch.TagSearchContext, tag, hash_ids = None, hash_ids_table_name = None, allow_unnamespaced_to_fetch_namespaced = True, job_key = None ):
         
         ( namespace, subtag ) = HydrusTags.SplitTag( tag )
@@ -10445,17 +10671,23 @@ class DB( HydrusDB.HydrusDB ):
         file_service_id = self.modules_services.GetServiceId( file_service_key )
         tag_service_id = self.modules_services.GetServiceId( tag_search_context.service_key )
         
-        possible_subtag_ids = self._GetSubtagIdsFromWildcard( file_service_id, tag_service_id, subtag_wildcard, job_key = job_key )
-        
-        if namespace_wildcard != '':
+        with HydrusDB.TemporaryIntegerTable( self._c, [], 'subtag_id' ) as temp_subtag_ids_table_name:
             
-            possible_namespace_ids = self._GetNamespaceIdsFromWildcard( namespace_wildcard )
+            self._GetSubtagIdsFromWildcardIntoTable( file_service_id, tag_service_id, subtag_wildcard, temp_subtag_ids_table_name, job_key = job_key )
             
-            return self._GetHashIdsFromNamespaceIdsSubtagIds( tag_display_type, file_service_key, tag_search_context, possible_namespace_ids, possible_subtag_ids, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
-            
-        else:
-            
-            return self._GetHashIdsFromSubtagIds( tag_display_type, file_service_key, tag_search_context, possible_subtag_ids, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
+            if namespace_wildcard != '':
+                
+                possible_namespace_ids = self._GetNamespaceIdsFromWildcard( namespace_wildcard )
+                
+                with HydrusDB.TemporaryIntegerTable( self._c, possible_namespace_ids, 'namespace_id' ) as temp_namespace_ids_table_name:
+                    
+                    return self._GetHashIdsFromNamespaceIdsSubtagIdsTables( tag_display_type, file_service_key, tag_search_context, temp_namespace_ids_table_name, temp_subtag_ids_table_name, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
+                    
+                
+            else:
+                
+                return self._GetHashIdsFromSubtagIdsTable( tag_display_type, file_service_key, tag_search_context, temp_subtag_ids_table_name, hash_ids = hash_ids, hash_ids_table_name = hash_ids_table_name, job_key = job_key )
+                
             
         
     
@@ -10568,7 +10800,7 @@ class DB( HydrusDB.HydrusDB ):
             
         
     
-    def _GetHashIdStatus( self, hash_id, prefix = '' ):
+    def _GetHashIdStatus( self, hash_id, prefix = '' ) -> ClientImportFiles.FileImportStatus:
         
         if prefix != '':
             
@@ -10605,7 +10837,7 @@ class DB( HydrusDB.HydrusDB ):
                 note = 'Deleted from the client {} ({}), which was {} before this check.'.format( HydrusData.ConvertTimestampToPrettyTime( timestamp ), file_deletion_reason, ClientData.TimestampToPrettyTimeDelta( timestamp ) )
                 
             
-            return ( CC.STATUS_DELETED, hash, prefix + note )
+            return ClientImportFiles.FileImportStatus( CC.STATUS_DELETED, hash, note = prefix + note )
             
         
         result = self._c.execute( 'SELECT timestamp FROM current_files WHERE service_id = ? AND hash_id = ?;', ( self.modules_services.trash_service_id, hash_id ) ).fetchone()
@@ -10616,7 +10848,7 @@ class DB( HydrusDB.HydrusDB ):
             
             note = 'Currently in trash ({}). Sent there at {}, which was {} before this check.'.format( file_deletion_reason, HydrusData.ConvertTimestampToPrettyTime( timestamp ), ClientData.TimestampToPrettyTimeDelta( timestamp, just_now_threshold = 0 ) )
             
-            return ( CC.STATUS_DELETED, hash, prefix + note )
+            return ClientImportFiles.FileImportStatus( CC.STATUS_DELETED, hash, note = prefix + note )
             
         
         result = self._c.execute( 'SELECT timestamp FROM current_files WHERE service_id = ? AND hash_id = ?;', ( self.modules_services.combined_local_file_service_id, hash_id ) ).fetchone()
@@ -10627,26 +10859,15 @@ class DB( HydrusDB.HydrusDB ):
             
             mime = self.modules_files_metadata_basic.GetMime( hash_id )
             
-            try:
-                
-                self._controller.client_files_manager.LocklessGetFilePath( hash, mime )
-                
-            except HydrusExceptions.FileMissingException:
-                
-                note = 'The client believed this file was already in the db, but it was truly missing! Import will go ahead, in an attempt to fix the situation.'
-                
-                return ( CC.STATUS_UNKNOWN, hash, prefix + note )
-                
-            
             note = 'Imported at {}, which was {} before this check.'.format( HydrusData.ConvertTimestampToPrettyTime( timestamp ), ClientData.TimestampToPrettyTimeDelta( timestamp, just_now_threshold = 0 ) )
             
-            return ( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, hash, prefix + note )
+            return ClientImportFiles.FileImportStatus( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, hash, mime = mime, note = prefix + note )
             
         
-        return ( CC.STATUS_UNKNOWN, hash, '' )
+        return ClientImportFiles.FileImportStatus( CC.STATUS_UNKNOWN, hash )
         
     
-    def _GetHashStatus( self, hash_type, hash, prefix = None ):
+    def _GetHashStatus( self, hash_type, hash, prefix = None ) -> ClientImportFiles.FileImportStatus:
         
         if prefix is None:
             
@@ -10657,13 +10878,15 @@ class DB( HydrusDB.HydrusDB ):
             
             if not self._HashExists( hash ):
                 
-                return ( CC.STATUS_UNKNOWN, hash, '' )
+                f = ClientImportFiles.FileImportStatus.STATICGetUnknownStatus()
+                
+                f.hash = hash
+                
+                return f
                 
             else:
                 
                 hash_id = self.modules_hashes_local_cache.GetHashId( hash )
-                
-                return self._GetHashIdStatus( hash_id, prefix = prefix )
                 
             
         else:
@@ -10672,13 +10895,13 @@ class DB( HydrusDB.HydrusDB ):
                 
                 hash_id = self.modules_hashes.GetHashIdFromExtraHash( hash_type, hash )
                 
-                return self._GetHashIdStatus( hash_id, prefix = prefix )
-                
             except HydrusExceptions.DataMissing:
                 
-                return ( CC.STATUS_UNKNOWN, None, '' )
+                return ClientImportFiles.FileImportStatus.STATICGetUnknownStatus()
                 
             
+        
+        return self._GetHashIdStatus( hash_id, prefix = prefix )
         
     
     def _GetIdealClientFilesLocations( self ):
@@ -10726,15 +10949,6 @@ class DB( HydrusDB.HydrusDB ):
         
         jobs_to_do = []
         
-        # vacuum
-        
-        due_names = self._GetMaintenanceVacuumNamesDue( stop_time = stop_time )
-        
-        if len( due_names ) > 0:
-            
-            jobs_to_do.append( 'vacuum ' + ', '.join( due_names ) )
-            
-        
         # analyze
         
         names_to_analyze = self._GetTableNamesDueAnalysis()
@@ -10756,9 +10970,12 @@ class DB( HydrusDB.HydrusDB ):
     
     def _GetMaintenanceVacuumNamesDue( self, stop_time = None ):
         
+        # this is the old code that worked on regular vacuums. we'll move to a manually-fired system, probably working next shutdown or similar, that presents a table of databases and 'last done' time etc..
+        # so, don't delete the vacuum_timestamps table, but modify this to return name, size, and timestamp
+        
         due_names = []
         
-        maintenance_vacuum_period_days = self._controller.new_options.GetNoneableInteger( 'maintenance_vacuum_period_days' )
+        maintenance_vacuum_period_days = 90
         
         if maintenance_vacuum_period_days is not None:
             
@@ -11215,13 +11432,13 @@ class DB( HydrusDB.HydrusDB ):
         
         service = self.modules_services.GetService( service_id )
         
-        account = service.GetAccount()
-        
         service_type = service.GetServiceType()
         
-        client_to_server_update = HydrusNetwork.ClientToServerUpdate()
-        
         if service_type in HC.REPOSITORIES:
+            
+            account = service.GetAccount()
+            
+            client_to_server_update = HydrusNetwork.ClientToServerUpdate()
             
             if service_type == HC.TAG_REPOSITORY:
                 
@@ -11663,11 +11880,11 @@ class DB( HydrusDB.HydrusDB ):
         
         repository_updates_table_name = GenerateRepositoryUpdatesTableName( service_id )
         
-        result = self._c.execute( 'SELECT 1 FROM {} NATURAL JOIN files_info WHERE mime = ? AND processed = ?;'.format( repository_updates_table_name ), ( HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS, True ) ).fetchone()
+        result = self._c.execute( 'SELECT 1 FROM {} CROSS JOIN files_info USING ( hash_id ) WHERE mime = ? AND processed = ?;'.format( repository_updates_table_name ), ( HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS, True ) ).fetchone()
         
         this_is_first_definitions_work = result is None
         
-        result = self._c.execute( 'SELECT 1 FROM {} NATURAL JOIN files_info WHERE mime = ? AND processed = ?;'.format( repository_updates_table_name ), ( HC.APPLICATION_HYDRUS_UPDATE_CONTENT, True ) ).fetchone()
+        result = self._c.execute( 'SELECT 1 FROM {} CROSS JOIN files_info USING ( hash_id ) WHERE mime = ? AND processed = ?;'.format( repository_updates_table_name ), ( HC.APPLICATION_HYDRUS_UPDATE_CONTENT, True ) ).fetchone()
         
         this_is_first_content_work = result is None
         
@@ -11915,22 +12132,26 @@ class DB( HydrusDB.HydrusDB ):
                         
                     elif info_type in ( HC.SERVICE_INFO_NUM_MAPPINGS, HC.SERVICE_INFO_NUM_PENDING_MAPPINGS ):
                         
-                        ac_cache_table_name = self._CacheMappingsGetACCacheTableName( ClientTags.TAG_DISPLAY_STORAGE, self.modules_services.combined_file_service_id, service_id )
-                        
                         if info_type == HC.SERVICE_INFO_NUM_MAPPINGS:
+                            
+                            ac_cache_table_name = self._CacheMappingsGetACCacheTableName( ClientTags.TAG_DISPLAY_STORAGE, self.modules_services.combined_file_service_id, service_id )
                             
                             column_name = 'current_count'
                             
+                            result = self._c.execute( 'SELECT SUM( {} ) FROM {};'.format( column_name, ac_cache_table_name ) ).fetchone()
+                            
+                            if result is None or result[0] is None:
+                                
+                                result = ( 0, )
+                                
+                            
                         elif info_type == HC.SERVICE_INFO_NUM_PENDING_MAPPINGS:
                             
-                            column_name = 'pending_count'
+                            # since pending is nearly always far smaller rowcount than current, if I pull this from a/c table, it is a HUGE waste of time and not faster than counting the raw table rows!
                             
-                        
-                        result = self._c.execute( 'SELECT SUM( {} ) FROM {};'.format( column_name, ac_cache_table_name ) ).fetchone()
-                        
-                        if result is None or result[0] is None:
+                            info = self.modules_mappings_storage.GetPendingCount( service_id )
                             
-                            result = ( 0, )
+                            result = ( info, )
                             
                         
                     elif info_type == HC.SERVICE_INFO_NUM_DELETED_MAPPINGS: result = self._c.execute( 'SELECT COUNT( * ) FROM ' + deleted_mappings_table_name + ';' ).fetchone()
@@ -12133,6 +12354,117 @@ class DB( HydrusDB.HydrusDB ):
         return result_subtag_ids
         
     
+    def _GetSubtagIdsFromWildcardIntoTable( self, file_service_id: int, tag_service_id: int, subtag_wildcard, subtag_id_table_name, job_key = None ):
+        
+        if tag_service_id == self.modules_services.combined_tag_service_id:
+            
+            search_tag_service_ids = self.modules_services.GetServiceIds( HC.REAL_TAG_SERVICES )
+            
+        else:
+            
+            search_tag_service_ids = ( tag_service_id, )
+            
+        
+        for search_tag_service_id in search_tag_service_ids:
+            
+            if '*' in subtag_wildcard:
+                
+                subtags_fts4_table_name = self._CacheTagsGetSubtagsFTS4TableName( file_service_id, search_tag_service_id )
+                
+                wildcard_has_fts4_searchable_characters = WildcardHasFTS4SearchableCharacters( subtag_wildcard )
+                
+                if subtag_wildcard == '*':
+                    
+                    # hellmode, but shouldn't be called normally
+                    cursor = self._c.execute( 'SELECT docid FROM {};'.format( subtags_fts4_table_name ) )
+                    
+                elif ClientSearch.IsComplexWildcard( subtag_wildcard ) or not wildcard_has_fts4_searchable_characters:
+                    
+                    # FTS4 does not support complex wildcards, so instead we'll search our raw subtags
+                    # however, since we want to search 'searchable' text, we use the 'searchable subtags map' to cross between real and searchable
+                    
+                    like_param = ConvertWildcardToSQLiteLikeParameter( subtag_wildcard )
+                    
+                    if subtag_wildcard.startswith( '*' ) or not wildcard_has_fts4_searchable_characters:
+                        
+                        # this is a SCAN, but there we go
+                        # a potential optimisation here, in future, is to store fts4 of subtags reversed, then for '*amus', we can just search that reverse cache for 'suma*'
+                        # and this would only double the size of the fts4 cache, the largest cache in the whole db! a steal!
+                        # it also would not fix '*amu*', but with some cleverness could speed up '*amus ar*'
+                        
+                        query = 'SELECT docid FROM {} WHERE subtag LIKE ?;'.format( subtags_fts4_table_name )
+                        
+                        cursor = self._c.execute( query, ( like_param, ) )
+                        
+                    else:
+                        
+                        # we have an optimisation here--rather than searching all subtags for bl*ah, let's search all the bl* subtags for bl*ah!
+                        
+                        prefix_fts4_wildcard = subtag_wildcard.split( '*' )[0]
+                        
+                        prefix_fts4_wildcard_param = '"{}*"'.format( prefix_fts4_wildcard )
+                        
+                        query = 'SELECT docid FROM {} WHERE subtag MATCH ? AND subtag LIKE ?;'.format( subtags_fts4_table_name )
+                        
+                        cursor = self._c.execute( query, ( prefix_fts4_wildcard_param, like_param ) )
+                        
+                    
+                else:
+                    
+                    # we want the " " wrapping our search text to keep whitespace words connected and in order
+                    # "samus ar*" should not match "around samus"
+                    
+                    # simple 'sam*' style subtag, so we can search fts4 no prob
+                    
+                    subtags_fts4_param = '"{}"'.format( subtag_wildcard )
+                    
+                    cursor = self._c.execute( 'SELECT docid FROM {} WHERE subtag MATCH ?;'.format( subtags_fts4_table_name ), ( subtags_fts4_param, ) )
+                    
+                
+                cancelled_hook = None
+                
+                if job_key is not None:
+                    
+                    cancelled_hook = job_key.IsCancelled
+                    
+                
+                loop_of_subtag_id_tuples = HydrusDB.ReadFromCancellableCursor( cursor, 1024, cancelled_hook = cancelled_hook )
+                
+                self._c.executemany( 'INSERT OR IGNORE INTO {} ( subtag_id ) VALUES ( ? );'.format( subtag_id_table_name ), loop_of_subtag_id_tuples )
+                
+            else:
+                
+                # old notes from before we had searchable subtag map. I deleted that map once, albeit in an older and less efficient form. *don't delete it again, it has use*
+                #
+                # NOTE: doing a subtag = 'blah' lookup on subtags_fts4 tables is ultra slow, lmao!
+                # attempts to match '/a/' to 'a' with clever FTS4 MATCHing (i.e. a MATCH on a*\b, then an '= a') proved not super successful
+                # in testing, it was still a bit slow. my guess is it is still iterating through all the nodes for ^a*, the \b just makes it a bit more efficient sometimes
+                # in tests '^a\b' was about twice as fast as 'a*', so the \b might not even be helping at all
+                # so, I decided to move back to a lean and upgraded searchable subtag map, and here we are
+                
+                subtags_searchable_map_table_name = self._CacheTagsGetSubtagsSearchableMapTableName( file_service_id, search_tag_service_id )
+                
+                searchable_subtag = subtag_wildcard
+                
+                if self.modules_tags.SubtagExists( searchable_subtag ):
+                    
+                    searchable_subtag_id = self.modules_tags.GetSubtagId( searchable_subtag )
+                    
+                    self._c.execute( 'INSERT OR IGNORE INTO {} ( subtag_id ) VALUES ( ? );'.format( subtag_id_table_name ), ( searchable_subtag_id, ) )
+                    
+                    self._c.execute( 'INSERT OR IGNORE INTO {} ( subtag_id ) SELECT subtag_id FROM {} WHERE searchable_subtag_id = ?;'.format( subtag_id_table_name, subtags_searchable_map_table_name ), ( searchable_subtag_id, ) )
+                    
+                
+            
+            if job_key is not None and job_key.IsCancelled():
+                
+                self._c.execute( 'DELETE FROM {};'.format( subtag_id_table_name ) )
+                
+                return
+                
+            
+        
+    
     def _GetTagIdsFromNamespaceIds( self, file_service_id: int, tag_service_id: int, namespace_ids: typing.Collection[ int ], job_key = None ):
         
         if len( namespace_ids ) == 0:
@@ -12200,48 +12532,53 @@ class DB( HydrusDB.HydrusDB ):
             return set()
             
         
-        final_result_tag_ids = set()
-        
         with HydrusDB.TemporaryIntegerTable( self._c, subtag_ids, 'subtag_id' ) as temp_subtag_ids_table_name:
             
             with HydrusDB.TemporaryIntegerTable( self._c, namespace_ids, 'namespace_id' ) as temp_namespace_ids_table_name:
                 
-                if tag_service_id == self.modules_services.combined_tag_service_id:
+                return self._GetTagIdsFromNamespaceIdsSubtagIdsTables( file_service_id, tag_service_id, temp_namespace_ids_table_name, temp_subtag_ids_table_name, job_key = job_key )
+                
+            
+        
+    
+    def _GetTagIdsFromNamespaceIdsSubtagIdsTables( self, file_service_id: int, tag_service_id: int, namespace_ids_table_name: str, subtag_ids_table_name: str, job_key = None ):
+        
+        final_result_tag_ids = set()
+        
+        if tag_service_id == self.modules_services.combined_tag_service_id:
+            
+            search_tag_service_ids = self.modules_services.GetServiceIds( HC.REAL_TAG_SERVICES )
+            
+        else:
+            
+            search_tag_service_ids = ( tag_service_id, )
+            
+        
+        for search_tag_service_id in search_tag_service_ids:
+            
+            tags_table_name = self._CacheTagsGetTagsTableName( file_service_id, search_tag_service_id )
+            
+            # temp subtags to tags to temp namespaces
+            cursor = self._c.execute( 'SELECT tag_id FROM {} CROSS JOIN {} USING ( subtag_id ) CROSS JOIN {} USING ( namespace_id );'.format( subtag_ids_table_name, tags_table_name, namespace_ids_table_name ) )
+            
+            cancelled_hook = None
+            
+            if job_key is not None:
+                
+                cancelled_hook = job_key.IsCancelled
+                
+            
+            result_tag_ids = self._STS( HydrusDB.ReadFromCancellableCursor( cursor, 128, cancelled_hook = cancelled_hook ) )
+            
+            if job_key is not None:
+                
+                if job_key.IsCancelled():
                     
-                    search_tag_service_ids = self.modules_services.GetServiceIds( HC.REAL_TAG_SERVICES )
-                    
-                else:
-                    
-                    search_tag_service_ids = ( tag_service_id, )
+                    return set()
                     
                 
-                for search_tag_service_id in search_tag_service_ids:
-                    
-                    tags_table_name = self._CacheTagsGetTagsTableName( file_service_id, search_tag_service_id )
-                    
-                    # temp subtags to tags to temp namespaces
-                    cursor = self._c.execute( 'SELECT tag_id FROM {} CROSS JOIN {} USING ( subtag_id ) CROSS JOIN {} USING ( namespace_id );'.format( temp_subtag_ids_table_name, tags_table_name, temp_namespace_ids_table_name ) )
-                    
-                    cancelled_hook = None
-                    
-                    if job_key is not None:
-                        
-                        cancelled_hook = job_key.IsCancelled
-                        
-                    
-                    result_tag_ids = self._STS( HydrusDB.ReadFromCancellableCursor( cursor, 128, cancelled_hook = cancelled_hook ) )
-                    
-                    if job_key is not None:
-                        
-                        if job_key.IsCancelled():
-                            
-                            return set()
-                            
-                        
-                    
-                    final_result_tag_ids.update( result_tag_ids )
-                    
-                
+            
+            final_result_tag_ids.update( result_tag_ids )
             
         
         return final_result_tag_ids
@@ -12254,45 +12591,50 @@ class DB( HydrusDB.HydrusDB ):
             return set()
             
         
-        final_result_tag_ids = set()
-        
         with HydrusDB.TemporaryIntegerTable( self._c, subtag_ids, 'subtag_id' ) as temp_subtag_ids_table_name:
             
-            if tag_service_id == self.modules_services.combined_tag_service_id:
+            return self._GetTagIdsFromSubtagIdsTable( file_service_id, tag_service_id, temp_subtag_ids_table_name, job_key = job_key )
+            
+        
+    
+    def _GetTagIdsFromSubtagIdsTable( self, file_service_id: int, tag_service_id: int, subtag_ids_table_name: str, job_key = None ):
+        
+        final_result_tag_ids = set()
+        
+        if tag_service_id == self.modules_services.combined_tag_service_id:
+            
+            search_tag_service_ids = self.modules_services.GetServiceIds( HC.REAL_TAG_SERVICES )
+            
+        else:
+            
+            search_tag_service_ids = ( tag_service_id, )
+            
+        
+        for search_tag_service_id in search_tag_service_ids:
+            
+            tags_table_name = self._CacheTagsGetTagsTableName( file_service_id, search_tag_service_id )
+            
+            # temp subtags to tags
+            cursor = self._c.execute( 'SELECT tag_id FROM {} CROSS JOIN {} USING ( subtag_id );'.format( subtag_ids_table_name, tags_table_name ) )
+            
+            cancelled_hook = None
+            
+            if job_key is not None:
                 
-                search_tag_service_ids = self.modules_services.GetServiceIds( HC.REAL_TAG_SERVICES )
-                
-            else:
-                
-                search_tag_service_ids = ( tag_service_id, )
+                cancelled_hook = job_key.IsCancelled
                 
             
-            for search_tag_service_id in search_tag_service_ids:
+            result_tag_ids = self._STS( HydrusDB.ReadFromCancellableCursor( cursor, 128, cancelled_hook = cancelled_hook ) )
+            
+            if job_key is not None:
                 
-                tags_table_name = self._CacheTagsGetTagsTableName( file_service_id, search_tag_service_id )
-                
-                # temp subtags to tags
-                cursor = self._c.execute( 'SELECT tag_id FROM {} CROSS JOIN {} USING ( subtag_id );'.format( temp_subtag_ids_table_name, tags_table_name ) )
-                
-                cancelled_hook = None
-                
-                if job_key is not None:
+                if job_key.IsCancelled():
                     
-                    cancelled_hook = job_key.IsCancelled
+                    return set()
                     
                 
-                result_tag_ids = self._STS( HydrusDB.ReadFromCancellableCursor( cursor, 128, cancelled_hook = cancelled_hook ) )
-                
-                if job_key is not None:
-                    
-                    if job_key.IsCancelled():
-                        
-                        return set()
-                        
-                    
-                
-                final_result_tag_ids.update( result_tag_ids )
-                
+            
+            final_result_tag_ids.update( result_tag_ids )
             
         
         return final_result_tag_ids
@@ -12508,6 +12850,8 @@ class DB( HydrusDB.HydrusDB ):
         
         hash_ids = self._STS( self._c.execute( 'SELECT hash_id FROM current_files WHERE service_id = ?' + age_phrase + limit_phrase + ';', ( self.modules_services.trash_service_id, ) ) )
         
+        hash_ids = self._FilterForFileDeleteLock( self.modules_services.trash_service_id, hash_ids )
+        
         if HG.db_report_mode:
             
             message = 'When asked for '
@@ -12536,7 +12880,7 @@ class DB( HydrusDB.HydrusDB ):
         return self.modules_hashes_local_cache.GetHashes( hash_ids )
         
     
-    def _GetURLStatuses( self, url ):
+    def _GetURLStatuses( self, url ) -> typing.List[ ClientImportFiles.FileImportStatus ]:
         
         search_urls = ClientNetworkingDomain.GetSearchURLs( url )
         
@@ -12895,7 +13239,7 @@ class DB( HydrusDB.HydrusDB ):
         return file_service_ids_to_hash_ids
         
     
-    def _HandleCriticalRepositoryDefinitionError( self, service_id ):
+    def _HandleCriticalRepositoryDefinitionError( self, service_id, name, bad_ids ):
         
         self._ReprocessRepositoryFromServiceId( service_id, ( HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS, ) )
         
@@ -12904,7 +13248,11 @@ class DB( HydrusDB.HydrusDB ):
         
         self._cursor_transaction_wrapper.CommitAndBegin()
         
-        raise Exception( 'A critical error was discovered with one of your repositories: its definition reference is in an invalid state. Your repository should now be paused, and all update files have been scheduled for an integrity and metadata check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository. Once unpaused, it will reprocess your definition files and attempt to fill the missing entries. If this error occurs again once that is complete, please inform hydrus dev.' )
+        message = 'A critical error was discovered with one of your repositories: its definition reference is in an invalid state. Your repository should now be paused, and all update files have been scheduled for an integrity and metadata check. Please permit file maintenance to check them, or tell it to do so manually, before unpausing your repository. Once unpaused, it will reprocess your definition files and attempt to fill the missing entries. If this error occurs again once that is complete, please inform hydrus dev.'
+        message += os.linesep * 2
+        message += 'Error: {}: {}'.format( name, bad_ids )
+        
+        raise Exception( message )
         
     
     def _HashExists( self, hash ):
@@ -12921,7 +13269,7 @@ class DB( HydrusDB.HydrusDB ):
             
         
     
-    def _ImportFile( self, file_import_job: ClientImportFileSeeds.FileImportJob ):
+    def _ImportFile( self, file_import_job: ClientImportFiles.FileImportJob ):
         
         if HG.file_import_report_mode:
             
@@ -12932,9 +13280,9 @@ class DB( HydrusDB.HydrusDB ):
         
         hash_id = self.modules_hashes_local_cache.GetHashId( hash )
         
-        ( status, status_hash, note ) = self._GetHashIdStatus( hash_id, prefix = 'file recognised' )
+        file_import_status = self._GetHashIdStatus( hash_id, prefix = 'file recognised by database' )
         
-        if status != CC.STATUS_SUCCESSFUL_BUT_REDUNDANT:
+        if not file_import_status.AlreadyInDB():
             
             if HG.file_import_report_mode:
                 
@@ -13036,15 +13384,15 @@ class DB( HydrusDB.HydrusDB ):
             
             #
             
-            status = CC.STATUS_SUCCESSFUL_AND_NEW
+            file_import_status = ClientImportFiles.FileImportStatus( CC.STATUS_SUCCESSFUL_AND_NEW, hash, mime = mime )
             
         
         if HG.file_import_report_mode:
             
-            HydrusData.ShowText( 'File import job done at db level, final status: {}, {}'.format( CC.status_string_lookup[ status ], note ) )
+            HydrusData.ShowText( 'File import job done at db level, final status: {}'.format( file_import_status.ToString() ) )
             
         
-        return ( status, note )
+        return file_import_status
         
     
     def _ImportUpdate( self, update_network_bytes, update_hash, mime ):
@@ -13721,7 +14069,18 @@ class DB( HydrusDB.HydrusDB ):
                                 
                             elif action == HC.CONTENT_UPDATE_DELETE:
                                 
-                                if service_id == self.modules_services.local_file_service_id:
+                                actual_delete_hash_ids = self._FilterForFileDeleteLock( service_id, hash_ids )
+                                
+                                if len( actual_delete_hash_ids ) < len( hash_ids ):
+                                    
+                                    hash_ids = actual_delete_hash_ids
+                                    
+                                    hashes = self.modules_hashes_local_cache.GetHashes( hash_ids )
+                                    
+                                    content_update.SetRow( hashes )
+                                    
+                                
+                                if service_type in ( HC.LOCAL_FILE_DOMAIN, HC.COMBINED_LOCAL_FILE ):
                                     
                                     reason = content_update.GetReason()
                                     
@@ -14579,7 +14938,7 @@ class DB( HydrusDB.HydrusDB ):
                     inserts.append( ( service_hash_id, hash_id ) )
                     
                 
-                self._c.executemany( 'INSERT OR IGNORE INTO {} ( service_hash_id, hash_id ) VALUES ( ?, ? );'.format( hash_id_map_table_name ), inserts )
+                self._c.executemany( 'REPLACE INTO {} ( service_hash_id, hash_id ) VALUES ( ?, ? );'.format( hash_id_map_table_name ), inserts )
                 
                 num_rows_processed += len( inserts )
                 
@@ -14616,7 +14975,7 @@ class DB( HydrusDB.HydrusDB ):
                     inserts.append( ( service_tag_id, tag_id ) )
                     
                 
-                self._c.executemany( 'INSERT OR IGNORE INTO {} ( service_tag_id, tag_id ) VALUES ( ?, ? );'.format( tag_id_map_table_name ), inserts )
+                self._c.executemany( 'REPLACE INTO {} ( service_tag_id, tag_id ) VALUES ( ?, ? );'.format( tag_id_map_table_name ), inserts )
                 
                 num_rows_processed += len( inserts )
                 
@@ -14672,6 +15031,7 @@ class DB( HydrusDB.HydrusDB ):
         elif action == 'filter_existing_tags': result = self._FilterExistingTags( *args, **kwargs )
         elif action == 'filter_hashes': result = self._FilterHashesByService( *args, **kwargs )
         elif action == 'force_refresh_tags_managers': result = self._GetForceRefreshTagsManagers( *args, **kwargs )
+        elif action == 'gui_session': result = self.modules_serialisable.GetGUISession( *args, **kwargs )
         elif action == 'hash_ids_to_hashes': result = self.modules_hashes_local_cache.GetHashIdsToHashes( *args, **kwargs )
         elif action == 'hash_status': result = self._GetHashStatus( *args, **kwargs )
         elif action == 'ideal_client_files_locations': result = self._GetIdealClientFilesLocations( *args, **kwargs )
@@ -14824,7 +15184,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating local hash cache' )
+            job_key.SetStatusTitle( 'regenerating local hash cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -14851,7 +15211,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating local tag cache' )
+            job_key.SetStatusTitle( 'regenerating local tag cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -14881,7 +15241,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerate tag fast search cache searchable subtag map' )
+            job_key.SetStatusTitle( 'regenerate tag fast search cache searchable subtag map' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -14953,7 +15313,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating tag fast search cache' )
+            job_key.SetStatusTitle( 'regenerating tag fast search cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -15033,7 +15393,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating tag display mappings cache' )
+            job_key.SetStatusTitle( 'regenerating tag display mappings cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -15154,7 +15514,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating tag display pending mappings cache' )
+            job_key.SetStatusTitle( 'regenerating tag display pending mappings cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -15235,7 +15595,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating tag mappings cache' )
+            job_key.SetStatusTitle( 'regenerating tag mappings cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -15360,7 +15720,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'regenerating tag pending mappings cache' )
+            job_key.SetStatusTitle( 'regenerating tag pending mappings cache' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -16081,7 +16441,7 @@ class DB( HydrusDB.HydrusDB ):
         
         try:
             
-            job_key.SetVariable( 'popup_title', 'repopulate tag fast search cache subtags' )
+            job_key.SetStatusTitle( 'repopulate tag fast search cache subtags' )
             
             self._controller.pub( 'modal_message', job_key )
             
@@ -16206,7 +16566,7 @@ class DB( HydrusDB.HydrusDB ):
             
             self._AddService( service_key, service_type, name, dictionary )
             
-            self.pub_after_job( 'notify_unknown_accounts' )
+            self.pub_after_job( 'notify_account_sync_due' )
             self.pub_after_job( 'notify_new_pending' )
             self.pub_after_job( 'notify_new_services_data' )
             self.pub_after_job( 'notify_new_services_gui' )
@@ -16364,7 +16724,7 @@ class DB( HydrusDB.HydrusDB ):
                 
             
         
-        self._c.executemany( 'INSERT OR IGNORE INTO ' + repository_updates_table_name + ' ( update_index, hash_id, processed ) VALUES ( ?, ?, ? );', inserts )
+        self._c.executemany( 'INSERT OR IGNORE INTO {} ( update_index, hash_id, processed ) VALUES ( ?, ?, ? );'.format( repository_updates_table_name ), inserts )
         
     
     def _SetServiceFilename( self, service_id, hash_id, filename ):
@@ -16655,848 +17015,6 @@ class DB( HydrusDB.HydrusDB ):
     def _UpdateDB( self, version ):
         
         self._controller.frame_splash_status.SetText( 'updating db to v' + str( version + 1 ) )
-        
-        if version == 369:
-            
-            try:
-                
-                # async processing came in 364. it truncated some data in certain large-list, slower-processing situations, so we want to reset some processing
-                # let's say 8 weeks to cover most of the problem for most people
-                
-                eight_weeks_previous = HydrusData.GetNow() - ( 8 * 7 * 86400 )
-                
-                service_ids = self.modules_services.GetServiceIds( ( HC.TAG_REPOSITORY, ) )
-                
-                for service_id in service_ids:
-                    
-                    service = self.modules_services.GetService( service_id )
-                    
-                    metadata = service.GetMetadata()
-                    
-                    repository_updates_table_name = GenerateRepositoryUpdatesTableName( service_id )
-                    
-                    update_indices_to_reset = set()
-                    
-                    for ( update_index, begin, end ) in metadata.GetUpdateIndicesAndTimes():
-                        
-                        if begin > eight_weeks_previous:
-                            
-                            update_indices_to_reset.add( update_index )
-                            
-                        
-                    
-                    content_hash_ids_to_reset = set()
-                    
-                    for update_index in update_indices_to_reset:
-                        
-                        content_hash_ids = self._STS( self._c.execute( 'SELECT hash_id from {} NATURAL JOIN files_info WHERE update_index = ? AND mime = ?;'.format( repository_updates_table_name ), ( update_index, HC.APPLICATION_HYDRUS_UPDATE_CONTENT ) ) )
-                        
-                        content_hash_ids_to_reset.update( content_hash_ids )
-                        
-                    
-                    self._c.executemany( 'UPDATE {} SET processed = ? WHERE hash_id = ?;'.format( repository_updates_table_name ), ( ( False, hash_id ) for hash_id in content_hash_ids_to_reset ) )
-                    
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to rewind some processing failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-            #
-            
-            result = self._c.execute( 'SELECT 1 FROM main.sqlite_master WHERE name = ?;', ( 'tag_censorship', ) ).fetchone()
-            
-            try:
-                
-                if result is not None:
-                    
-                    tag_display_manager = ClientTagsHandling.TagDisplayManager()
-                    
-                    old_tag_censorship = self._c.execute( 'SELECT service_id, blacklist, tags FROM tag_censorship;' ).fetchall()
-                    
-                    for ( service_id, blacklist, tags ) in old_tag_censorship:
-                        
-                        try:
-                            
-                            service = self.modules_services.GetService( service_id )
-                            
-                        except HydrusExceptions.DataMissing:
-                            
-                            continue
-                            
-                        
-                        service_key = service.GetServiceKey()
-                        
-                        tag_filter = HydrusTags.TagFilter()
-                        
-                        if blacklist:
-                            
-                            rule_type = HC.FILTER_BLACKLIST
-                            
-                        else:
-                            
-                            rule_type = HC.FILTER_WHITELIST
-                            
-                        
-                        for tag in tags:
-                            
-                            tag_filter.SetRule( tag, rule_type )
-                            
-                        
-                        tag_display_manager.SetTagFilter( ClientTags.TAG_DISPLAY_SINGLE_MEDIA, service_key, tag_filter )
-                        
-                    
-                    self.modules_serialisable.SetJSONDump( tag_display_manager )
-                    
-                    self._c.execute( 'DROP TABLE tag_censorship;' )
-                    
-                
-            except:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update tag censorship system to tag display system failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-            #
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultURLClasses( ( 'pixiv file page new format (without language)', 'pixiv file page new format (with language)' ) )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some url classes failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 370:
-            
-            try:
-                
-                new_options = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_CLIENT_OPTIONS )
-                
-                names_to_tag_filters = {}
-                
-                tag_filter = HydrusTags.TagFilter()
-                
-                tag_filter.SetRule( 'diaper', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'gore', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'guro', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'scat', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'vore', HC.FILTER_BLACKLIST )
-                
-                names_to_tag_filters[ 'example blacklist' ] = tag_filter
-                
-                tag_filter = HydrusTags.TagFilter()
-                
-                tag_filter.SetRule( '', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( ':', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'series:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( 'creator:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( 'studio:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( 'character:', HC.FILTER_WHITELIST )
-                
-                names_to_tag_filters[ 'basic namespaces only' ] = tag_filter
-                
-                tag_filter = HydrusTags.TagFilter()
-                
-                tag_filter.SetRule( ':', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'series:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( 'creator:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( 'studio:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( 'character:', HC.FILTER_WHITELIST )
-                tag_filter.SetRule( '', HC.FILTER_WHITELIST )
-                
-                names_to_tag_filters[ 'basic booru tags only' ] = tag_filter
-                
-                tag_filter = HydrusTags.TagFilter()
-                
-                tag_filter.SetRule( 'title:', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'filename:', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'source:', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'booru:', HC.FILTER_BLACKLIST )
-                tag_filter.SetRule( 'url:', HC.FILTER_BLACKLIST )
-                
-                names_to_tag_filters[ 'exclude long/spammy namespaces' ] = tag_filter
-                
-                new_options.SetFavouriteTagFilters( names_to_tag_filters )
-                
-                self.modules_serialisable.SetJSONDump( new_options )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to save new default favourite tag filters failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 374:
-            
-            try:
-                
-                login_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_LOGIN_MANAGER )
-                
-                login_manager.Initialise()
-                
-                #
-                
-                login_manager.OverwriteDefaultLoginScripts( [ 'danbooru login' ] )
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( login_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some login scripts failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 375:
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultGUGs( ( 'pixiv tag search', 'twitter username lookup' ) )
-                domain_manager.OverwriteDefaultURLClasses( ( 'pixiv search api', 'twitter tweets api - media only' ) )
-                domain_manager.OverwriteDefaultParsers( ( 'pixiv tag search api parser', 'twitter tweet parser (video from koto.reisen)', 'twitter media tweets api parser' ) )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some parsers failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 376:
-            
-            result = self._c.execute( 'SELECT 1 FROM external_master.sqlite_master WHERE name = ?;', ( 'url_domains', ) ).fetchone()
-            
-            try:
-                
-                if result is None:
-                    
-                    self._controller.frame_splash_status.SetSubtext( 'compressing url storage--creating' )
-                    
-                    self._c.execute( 'ALTER TABLE urls RENAME TO urls_old;' )
-                    
-                    self._c.execute( 'CREATE TABLE IF NOT EXISTS external_master.url_domains ( domain_id INTEGER PRIMARY KEY, domain TEXT UNIQUE );' )
-                    
-                    self._c.execute( 'CREATE TABLE IF NOT EXISTS external_master.urls ( url_id INTEGER PRIMARY KEY, domain_id INTEGER, url TEXT UNIQUE );' )
-                    
-                    self._controller.frame_splash_status.SetSubtext( 'compressing url storage--populating domains' )
-                    
-                    self._c.execute( 'INSERT INTO url_domains ( domain ) SELECT DISTINCT domain FROM urls_old;' )
-                    
-                    self._controller.frame_splash_status.SetSubtext( 'compressing url storage--populating urls' )
-                    
-                    self._c.execute( 'INSERT INTO urls ( url_id, domain_id, url ) SELECT url_id, domain_id, url FROM urls_old NATURAL JOIN url_domains;' )
-                    
-                    self._controller.frame_splash_status.SetSubtext( 'compressing url storage--indexing' )
-                    
-                    self._CreateIndex( 'external_master.urls', [ 'domain_id' ] )
-                    
-                    self._c.execute( 'DROP TABLE urls_old;' )
-                    
-                    self._controller.frame_splash_status.SetSubtext( 'compressing url storage--optimising' )
-                    
-                    self._c.execute( 'ANALYZE external_master.urls;' )
-                    
-                
-            except Exception as e:
-                
-                HydrusData.Print( 'Could not update URL storage!' )
-                HydrusData.PrintException( e )
-                
-                raise
-                
-            
-        
-        if version == 378:
-            
-            try:
-                
-                login_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_LOGIN_MANAGER )
-                
-                login_manager.Initialise()
-                
-                domains_to_login_info = login_manager.GetDomainsToLoginInfo()
-                
-                for ( login_domain, ( login_script_key_and_name, credentials, login_access_type, login_access_text, active, validity, validity_error_text, no_work_until, no_work_until_reason ) ) in list( domains_to_login_info.items() ):
-                    
-                    ( login_script_key, login_script_name ) = login_script_key_and_name
-                    
-                    if login_domain == 'www.pixiv.net' and login_script_name == 'pixiv login' and active:
-                        
-                        active = False
-                        
-                        domains_to_login_info[ login_domain ] = ( login_script_key_and_name, credentials, login_access_type, login_access_text, active, validity, validity_error_text, no_work_until, no_work_until_reason )
-                        
-                        login_manager.SetDomainsToLoginInfo( domains_to_login_info )
-                        
-                        self.modules_serialisable.SetJSONDump( login_manager )
-                        
-                        self.pub_initial_message( 'The default Pixiv login script no longer works. It appeared to be active for you, so it has been deactivated. Please use the Hydrus Companion web browser addon to log in to Pixiv.' )
-                        
-                        break
-                        
-                    
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to deactivate pixiv login failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultGUGs( [ 'derpibooru tag search', 'derpibooru tag search - no filter' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultURLClasses( [ 'derpibooru gallery page', 'derpibooru file page' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultParsers( [ 'derpibooru.org file page parser', 'derpibooru gallery page parser' ] )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update derpibooru failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 379:
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultURLClasses( [ 'pixiv artist page', '8kun thread', '8kun thread json api', 'vch.moe thread', 'vch.moe thread json api' ] )
-                
-                domain_manager.DeleteURLClasses( [ 'pixiv artist gallery page' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultParsers( [ '4chan-style thread api parser', '8kun thread api parser' ] )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some downloader objects failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 380:
-            
-            try:
-                
-                new_options = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_CLIENT_OPTIONS )
-                
-                default_view_options = new_options.GetDefaultMediaViewOptions()
-                
-                new_options.SetMediaViewOptions( default_view_options )
-                
-                self.modules_serialisable.SetJSONDump( new_options )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update the media view options failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 382:
-            
-            existing_shortcut_names = self.modules_serialisable.GetJSONDumpNames( HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET )
-            
-            if 'global' not in existing_shortcut_names:
-                
-                list_of_shortcuts = ClientDefaults.GetDefaultShortcuts()
-                
-                for shortcuts in list_of_shortcuts:
-                    
-                    if shortcuts.GetName() == 'global':
-                        
-                        self.modules_serialisable.SetJSONDump( shortcuts )
-                        
-                    
-                
-            
-        
-        if version == 383:
-            
-            existing_shortcut_names = self.modules_serialisable.GetJSONDumpNames( HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET )
-            
-            list_of_shortcuts = ClientDefaults.GetDefaultShortcuts()
-            
-            for new_name in ( 'media_viewer_media_window', 'preview_media_window' ):
-                
-                if new_name not in existing_shortcut_names:
-                    
-                    for shortcuts in list_of_shortcuts:
-                        
-                        if shortcuts.GetName() == new_name:
-                            
-                            self.modules_serialisable.SetJSONDump( shortcuts )
-                            
-                        
-                    
-                
-            
-            if 'media_viewer_browser' in existing_shortcut_names:
-                
-                try:
-                    
-                    media_viewer_browser_shortcuts = self.modules_serialisable.GetJSONDumpNamed( HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET, dump_name = 'media_viewer_browser' )
-                    
-                    from hydrus.client.gui import ClientGUIShortcuts
-                    
-                    right_up = ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_MOUSE, ClientGUIShortcuts.SHORTCUT_MOUSE_RIGHT, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_RELEASE, [] )
-                    
-                    if media_viewer_browser_shortcuts.GetCommand( right_up ) is None:
-                        
-                        media_viewer_browser_shortcuts.SetCommand( right_up, CAC.ApplicationCommand( CAC.APPLICATION_COMMAND_TYPE_SIMPLE, CAC.SIMPLE_SHOW_MENU ) )
-                        
-                        self.modules_serialisable.SetJSONDump( media_viewer_browser_shortcuts )
-                        
-                    
-                except:
-                    
-                    HydrusData.PrintException( e )
-                    
-                    message = 'Trying to update the media_viewer_browser shortcuts failed! Please let hydrus dev know!'
-                    
-                    self.pub_initial_message( message )
-                    
-                
-            
-        
-        if version == 384:
-            
-            close_media_viewer = CAC.ApplicationCommand( CAC.APPLICATION_COMMAND_TYPE_SIMPLE, CAC.SIMPLE_CLOSE_MEDIA_VIEWER )
-            keep_archive_filter = CAC.ApplicationCommand( CAC.APPLICATION_COMMAND_TYPE_SIMPLE, CAC.SIMPLE_ARCHIVE_DELETE_FILTER_KEEP )
-            better_dupe_filter = CAC.ApplicationCommand( CAC.APPLICATION_COMMAND_TYPE_SIMPLE, CAC.SIMPLE_DUPLICATE_FILTER_THIS_IS_BETTER_AND_DELETE_OTHER )
-            
-            existing_shortcut_names = self.modules_serialisable.GetJSONDumpNames( HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET )
-            
-            from hydrus.client.gui import ClientGUIShortcuts
-            
-            updates_to_do = {}
-            
-            shortcuts_and_commands = []
-            
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_SPECIAL, ClientGUIShortcuts.SHORTCUT_KEY_SPECIAL_ENTER, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [] ), close_media_viewer ) )
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_SPECIAL, ClientGUIShortcuts.SHORTCUT_KEY_SPECIAL_ENTER, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [ ClientGUIShortcuts.SHORTCUT_MODIFIER_KEYPAD ] ), close_media_viewer ) )
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_SPECIAL, ClientGUIShortcuts.SHORTCUT_KEY_SPECIAL_RETURN, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [] ), close_media_viewer ) )
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_SPECIAL, ClientGUIShortcuts.SHORTCUT_KEY_SPECIAL_RETURN, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [ ClientGUIShortcuts.SHORTCUT_MODIFIER_KEYPAD ] ), close_media_viewer ) )
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_SPECIAL, ClientGUIShortcuts.SHORTCUT_KEY_SPECIAL_ESCAPE, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [] ), close_media_viewer ) )
-            
-            updates_to_do[ 'media_viewer' ] = shortcuts_and_commands
-            
-            shortcuts_and_commands = []
-            
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_MOUSE, ClientGUIShortcuts.SHORTCUT_MOUSE_LEFT, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_DOUBLE_CLICK, [] ), close_media_viewer ) )
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_MOUSE, ClientGUIShortcuts.SHORTCUT_MOUSE_MIDDLE, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [] ), close_media_viewer ) )
-            
-            updates_to_do[ 'media_viewer_browser' ] = shortcuts_and_commands
-            
-            shortcuts_and_commands = []
-            
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_MOUSE, ClientGUIShortcuts.SHORTCUT_MOUSE_LEFT, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_DOUBLE_CLICK, [] ), keep_archive_filter ) )
-            
-            updates_to_do[ 'archive_delete_filter' ] = shortcuts_and_commands
-            
-            shortcuts_and_commands = []
-            
-            shortcuts_and_commands.append( ( ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_MOUSE, ClientGUIShortcuts.SHORTCUT_MOUSE_LEFT, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_DOUBLE_CLICK, [] ), better_dupe_filter ) )
-            
-            updates_to_do[ 'duplicate_filter' ] = shortcuts_and_commands
-            
-            for ( shortcut_set_name, shortcuts_and_commands ) in updates_to_do.items():
-                
-                if shortcut_set_name in existing_shortcut_names:
-                    
-                    try:
-                        
-                        shortcut_set = self.modules_serialisable.GetJSONDumpNamed( HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET, dump_name = shortcut_set_name )
-                        
-                        for ( s, c ) in shortcuts_and_commands:
-                            
-                            if shortcut_set.GetCommand( s ) is None:
-                                
-                                shortcut_set.SetCommand( s, c )
-                                
-                            
-                        
-                        self.modules_serialisable.SetJSONDump( shortcut_set )
-                        
-                    except:
-                        
-                        HydrusData.PrintException( e )
-                        
-                        message = 'Trying to update the "{}" shortcuts failed! Please let hydrus dev know!'.format( shortcut_set_name )
-                        
-                        self.pub_initial_message( message )
-                        
-                    
-                
-            
-            #
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultParsers( [ 'danbooru file page parser', 'danbooru file page parser - get webm ugoira' ] )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some parsers failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 386:
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultURLClasses( [ 'tvch.moe thread', 'tvch.moe thread json api', 'derpibooru gallery page', 'derpibooru gallery page api' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultGUGs( [ 'derpibooru tag search', 'derpibooru tag search - no filter' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultParsers( [ '4chan-style thread api parser', 'derpibooru gallery page api parser' ] )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some parsers failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 387:
-            
-            result = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_FAVOURITE_SEARCH_MANAGER )
-            
-            if result is None:
-                
-                favourite_search_manager = ClientSearch.FavouriteSearchManager()
-                
-                ClientDefaults.SetDefaultFavouriteSearchManagerData( favourite_search_manager )
-                
-                self.modules_serialisable.SetJSONDump( favourite_search_manager )
-                
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultURLClasses( [ 'e621 file page', 'e621 gallery page' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultGUGs( [ 'e621 tag search' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultParsers( [ 'e621 file page parser', 'e621 gallery page parser' ] )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-                #
-                
-                login_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_LOGIN_MANAGER )
-                
-                login_manager.Initialise()
-                
-                #
-                
-                login_manager.DeleteLoginScripts( [ 'e-hentai login 2018.11.08', 'e-hentai login 2018.11.12' ] )
-                
-                #
-                
-                if not login_manager.DomainHasALoginScript( 'e-hentai.org' ):
-                    
-                    login_manager.DeleteLoginDomain( 'e-hentai.org' )
-                    
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( login_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some parsers failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-        
-        if version == 388:
-            
-            try:
-                
-                favourite_search_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_FAVOURITE_SEARCH_MANAGER )
-                
-                folders_to_names = favourite_search_manager.GetFoldersToNames()
-                
-                do_it = True
-                
-                if None in folders_to_names:
-                    
-                    if 'empty page' in folders_to_names[ None ]:
-                        
-                        do_it = False
-                        
-                    
-                
-                if do_it:
-                    
-                    foldername = None
-                    name = 'empty page'
-                    
-                    tag_search_context = ClientSearch.TagSearchContext()
-                    
-                    predicates = []
-                    
-                    file_search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, tag_search_context = tag_search_context, predicates = predicates )
-                    
-                    synchronised = True
-                    media_sort = None
-                    media_collect = None
-                    
-                    new_rows = [ ( foldername, name, file_search_context, synchronised, media_sort, media_collect ) ]
-                    
-                    #
-                    
-                    rows = list( favourite_search_manager.GetFavouriteSearchRows() )
-                    
-                    rows.extend( new_rows )
-                    
-                    favourite_search_manager.SetFavouriteSearchRows( rows )
-                    
-                    self.modules_serialisable.SetJSONDump( favourite_search_manager )
-                    
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to add an empty favourite search failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-            try:
-                
-                script_rows = ClientDefaults.GetDefaultScriptRows()
-                
-                for script_row in script_rows:
-                    
-                    dump_type = script_row[0]
-                    dump_name = script_row[1]
-                    
-                    self._c.execute( 'DELETE FROM json_dumps_named WHERE dump_type = ? AND dump_name = ?;', ( dump_type, dump_name ) )
-                    
-                
-                self._c.executemany( 'REPLACE INTO json_dumps_named VALUES ( ?, ?, ?, ?, ? );', script_rows )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to add new file lookup scripts search failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
-            try:
-                
-                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
-                
-                domain_manager.Initialise()
-                
-                #
-                
-                domain_manager.OverwriteDefaultURLClasses( [ 'deviant art file page', 'deviant art file page api', 'e621 file page (old format)' ] )
-                
-                #
-                
-                domain_manager.OverwriteDefaultParsers( [ 'e621 file page parser', 'deviant art file page api parser' ] )
-                
-                #
-                
-                domain_manager.TryToLinkURLClassesAndParsers()
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( domain_manager )
-                
-                #
-                
-                login_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_LOGIN_MANAGER )
-                
-                login_manager.Initialise()
-                
-                #
-                
-                login_manager.DeleteLoginScripts( [ 'nijie.info login script' ] )
-                
-                #
-                
-                if not login_manager.DomainHasALoginScript( 'nijie.info' ):
-                    
-                    login_manager.DeleteLoginDomain( 'nijie.info' )
-                    
-                
-                #
-                
-                self.modules_serialisable.SetJSONDump( login_manager )
-                
-            except Exception as e:
-                
-                HydrusData.PrintException( e )
-                
-                message = 'Trying to update some parsers failed! Please let hydrus dev know!'
-                
-                self.pub_initial_message( message )
-                
-            
         
         if version == 389:
             
@@ -19222,6 +18740,250 @@ class DB( HydrusDB.HydrusDB ):
                 
             
         
+        if version == 438:
+            
+            try:
+                
+                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
+                
+                domain_manager.Initialise()
+                
+                #
+                
+                domain_manager.OverwriteDefaultURLClasses( ( 'imgur single media file url', ) )
+                
+                #
+                
+                self.modules_serialisable.SetJSONDump( domain_manager )
+                
+            except Exception as e:
+                
+                HydrusData.PrintException( e )
+                
+                message = 'Trying to update some url classes failed! Please let hydrus dev know!'
+                
+                self.pub_initial_message( message )
+                
+            
+        
+        if version == 440:
+            
+            try:
+                
+                old_options = self._GetOptions()
+                
+                if 'sort_by' in old_options:
+                    
+                    old_sort_by = old_options[ 'sort_by' ]
+                    
+                    new_options = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_CLIENT_OPTIONS )
+                    
+                    default_namespace_sorts = [ ClientMedia.MediaSort( sort_type = ( 'namespaces', ( namespaces, ClientTags.TAG_DISPLAY_ACTUAL ) ) ) for ( gumpf, namespaces ) in old_sort_by ]
+                    
+                    new_options.SetDefaultNamespaceSorts( default_namespace_sorts )
+                    
+                    self.modules_serialisable.SetJSONDump( new_options )
+                    
+                
+            except Exception as e:
+                
+                HydrusData.PrintException( e )
+                
+                message = 'Trying to migrate the old default namespace sorts failed! Please let hydrus dev know!'
+                
+                self.pub_initial_message( message )
+                
+            
+            try:
+                
+                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
+                
+                domain_manager.Initialise()
+                
+                #
+                
+                domain_manager.OverwriteDefaultURLClasses( ( 'pixiv artist page (new format)', ) )
+                
+                #
+                
+                self.modules_serialisable.SetJSONDump( domain_manager )
+                
+            except Exception as e:
+                
+                HydrusData.PrintException( e )
+                
+                message = 'Trying to update some url classes failed! Please let hydrus dev know!'
+                
+                self.pub_initial_message( message )
+                
+            
+        
+        if version == 441:
+            
+            result = self._c.execute( 'SELECT 1 FROM sqlite_master WHERE name = ?;', ( 'json_dumps_hashed', ) ).fetchone()
+            
+            if result is None:
+                
+                self._controller.frame_splash_status.SetSubtext( 'doing pre-update free space check' )
+                
+                legacy_dump_type = HydrusSerialisable.SERIALISABLE_TYPE_GUI_SESSION_LEGACY
+                
+                result = self._c.execute( 'SELECT SUM( LENGTH( dump ) ) FROM json_dumps_named WHERE dump_type = ?;', ( legacy_dump_type, ) ).fetchone()
+                
+                if result is None or result[0] is None:
+                    
+                    raise Exception( 'Hey, for the v442 update step, I am supposed to be converting your sessions to a new object, but it did not seem like there were any! I am not sure what is going on, so the update will now be abandoned. Please roll back to v441 and let hydev know!' )
+                    
+                
+                ( space_needed, ) = result
+                
+                space_needed /= 2 # most sessions will have backups and shared pages will save space in the end
+                
+                try:
+                    
+                    HydrusPaths.CheckHasSpaceForDBTransaction( self._db_dir, space_needed )
+                    
+                except Exception as e:
+                    
+                    message = 'Hey, for the v442 update step, I am supposed to be converting your sessions to a new object, but there was a problem. It looks like you have very large sessions, and I do not think you have enough free disk space to perform the conversion safely. If you OK this dialog, it will be attempted anyway, but be warned: you may run out of space mid-update and then have serious problems. I recommend you kill the hydrus process NOW and then free up some space before trying again. Please check the full error:'
+                    message += os.linesep * 2
+                    message += str( e )
+                    
+                    BlockingSafeShowMessage( message )
+                    
+                
+                one_worked_ok = False
+                
+                self._c.execute( 'CREATE TABLE json_dumps_hashed ( hash BLOB_BYTES PRIMARY KEY, dump_type INTEGER, version INTEGER, dump BLOB_BYTES );' )
+                
+                names_and_timestamps = self._c.execute( 'SELECT dump_name, timestamp FROM json_dumps_named WHERE dump_type = ?;', ( legacy_dump_type, ) ).fetchall()
+                
+                from hydrus.client.gui.pages import ClientGUISessionLegacy
+                
+                import json
+                
+                for ( i, ( name, timestamp ) ) in enumerate( names_and_timestamps ):
+                    
+                    self._controller.frame_splash_status.SetSubtext( 'converting "{}" "{}"\u2026'.format( name, HydrusData.ConvertTimestampToPrettyTime( timestamp ) ) )
+                    
+                    ( dump_version, dump ) = self._c.execute( 'SELECT version, dump FROM json_dumps_named WHERE dump_type = ? AND dump_name = ? AND timestamp = ?;', ( legacy_dump_type, name, timestamp ) ).fetchone()
+                    
+                    try:
+                        
+                        if isinstance( dump, bytes ):
+                            
+                            dump = str( dump, 'utf-8' )
+                            
+                        
+                        serialisable_info = json.loads( dump )
+                        
+                        legacy_session = HydrusSerialisable.CreateFromSerialisableTuple( ( legacy_dump_type, name, dump_version, serialisable_info ) )
+                        
+                    except Exception as e:
+                        
+                        HydrusData.PrintException( e, do_wait = False )
+                        
+                        try:
+                            
+                            timestamp_string = time.strftime( '%Y-%m-%d %H-%M-%S' )
+                            
+                            filename = '({}, {}) at {}.json'.format( name, timestamp, timestamp_string )
+                            
+                            path = os.path.join( self._db_dir, filename )
+                            
+                            with open( path, 'wb' ) as f:
+                                
+                                if isinstance( dump, str ):
+                                    
+                                    dump = bytes( dump, 'utf-8', errors = 'replace' )
+                                    
+                                
+                                f.write( dump )
+                                
+                            
+                        except:
+                            
+                            pass
+                            
+                        
+                        message = 'When updating sessions, "{}" at "{}" was non-loadable/convertable! I tried to save a backup of the object to your database directory.'.format( name, HydrusData.ConvertTimestampToPrettyTime( timestamp ) )
+                        
+                        HydrusData.Print( message )
+                        
+                        self.pub_initial_message( message )
+                        
+                        continue
+                        
+                    
+                    session = ClientGUISessionLegacy.ConvertLegacyToNew( legacy_session )
+                    
+                    self.modules_serialisable.SetJSONDump( session, force_timestamp = timestamp )
+                    
+                    self._c.execute( 'DELETE FROM json_dumps_named WHERE dump_type = ? AND dump_name = ? AND timestamp = ?;', ( legacy_dump_type, name, timestamp ) )
+                    
+                    one_worked_ok = True
+                    
+                
+                if not one_worked_ok:
+                    
+                    raise Exception( 'When trying to update your sessions to the new format, none of them converted correctly! Rather than send you into an empty and potentially non-functional client, the update is now being abandoned. Please roll back to v441 and let hydev know!' )
+                    
+                
+                self._c.execute( 'DELETE FROM json_dumps_named WHERE dump_type = ?;', ( legacy_dump_type, ) )
+                
+                self._controller.frame_splash_status.SetSubtext( 'session converting finished' )
+                
+            
+            try:
+                
+                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
+                
+                domain_manager.Initialise()
+                
+                #
+                
+                domain_manager.OverwriteDefaultParsers( ( 'yande.re post page parser', 'moebooru file page parser' ) )
+                
+                #
+                
+                self.modules_serialisable.SetJSONDump( domain_manager )
+                
+            except Exception as e:
+                
+                HydrusData.PrintException( e )
+                
+                message = 'Trying to update some url classes failed! Please let hydrus dev know!'
+                
+                self.pub_initial_message( message )
+                
+            
+        
+        if version == 442:
+            
+            try:
+                
+                domain_manager = self.modules_serialisable.GetJSONDump( HydrusSerialisable.SERIALISABLE_TYPE_NETWORK_DOMAIN_MANAGER )
+                
+                domain_manager.Initialise()
+                
+                #
+                
+                domain_manager.OverwriteParserLink( 'yande.re file page', 'yande.re post page parser' )
+                
+                #
+                
+                self.modules_serialisable.SetJSONDump( domain_manager )
+                
+            except Exception as e:
+                
+                HydrusData.PrintException( e )
+                
+                message = 'Trying to update some url classes failed! Please let hydrus dev know!'
+                
+                self.pub_initial_message( message )
+                
+            
+        
         self._controller.frame_splash_status.SetTitleText( 'updated db to v{}'.format( HydrusData.ToHumanInt( version + 1 ) ) )
         
         self._c.execute( 'UPDATE version SET version = ?;', ( version + 1, ) )
@@ -19537,7 +19299,7 @@ class DB( HydrusDB.HydrusDB ):
             self._DeleteService( service_id )
             
         
-        self.pub_after_job( 'notify_unknown_accounts' )
+        self.pub_after_job( 'notify_account_sync_due' )
         self.pub_after_job( 'notify_new_services_data' )
         self.pub_after_job( 'notify_new_services_gui' )
         self.pub_after_job( 'notify_new_pending' )
@@ -19575,13 +19337,15 @@ class DB( HydrusDB.HydrusDB ):
                 
             
         
-        self.pub_after_job( 'notify_unknown_accounts' )
+        self.pub_after_job( 'notify_account_sync_due' )
         self.pub_after_job( 'notify_new_services_data' )
         self.pub_after_job( 'notify_new_services_gui' )
         self.pub_after_job( 'notify_new_pending' )
         
     
     def _Vacuum( self, maintenance_mode = HC.MAINTENANCE_FORCED, stop_time = None, force_vacuum = False ):
+        
+        # this is disabled for now. we'll modify it to work on individual files, maybe on next client shutdown
         
         new_options = self._controller.new_options
         
@@ -19646,7 +19410,7 @@ class DB( HydrusDB.HydrusDB ):
             
             job_key = ClientThreading.JobKey()
             
-            job_key.SetVariable( 'popup_title', 'database maintenance - vacuum' )
+            job_key.SetStatusTitle( 'database maintenance - vacuum' )
             
             self._CloseDBCursor()
             
@@ -19695,15 +19459,11 @@ class DB( HydrusDB.HydrusDB ):
                         
                         text = 'An attempt to vacuum the database failed.'
                         text += os.linesep * 2
-                        text += 'For now, automatic vacuuming has been disabled. If the error is not obvious, please contact the hydrus developer.'
+                        text += 'If the error is not obvious, please contact the hydrus developer.'
                         
                         HydrusData.ShowText( text )
                         
                         self._InitDBCursor()
-                        
-                        new_options.SetNoneableInteger( 'maintenance_vacuum_period_days', None )
-                        
-                        self._SaveOptions( HC.options )
                         
                         return
                         
@@ -19764,6 +19524,7 @@ class DB( HydrusDB.HydrusDB ):
         elif action == 'import_update': self._ImportUpdate( *args, **kwargs )
         elif action == 'last_shutdown_work_time': self._SetLastShutdownWorkTime( *args, **kwargs )
         elif action == 'local_booru_share': self.modules_serialisable.SetYAMLDump( ClientDBSerialisable.YAML_DUMP_ID_LOCAL_BOORU, *args, **kwargs )
+        elif action == 'maintain_hashed_serialisables': result = self.modules_serialisable.MaintainHashedStorage( *args, **kwargs )
         elif action == 'maintain_similar_files_search_for_potential_duplicates': result = self._PHashesSearchForPotentialDuplicates( *args, **kwargs )
         elif action == 'maintain_similar_files_tree': self.modules_similar_files.MaintainTree( *args, **kwargs )
         elif action == 'migration_clear_job': self._MigrationClearJob( *args, **kwargs )

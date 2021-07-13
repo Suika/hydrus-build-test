@@ -1,5 +1,6 @@
 import http.cookies
 import threading
+import time
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
@@ -378,6 +379,42 @@ class HydrusResourceRestrictedOptionsModify( HydrusResourceRestricted ):
     def _checkAccountPermissions( self, request: HydrusServerRequest.HydrusRequest ):
         
         request.hydrus_account.CheckPermission( HC.CONTENT_TYPE_OPTIONS, HC.PERMISSION_ACTION_MODERATE )
+        
+    
+class HydrusResourceRestrictedOptionsModifyNullificationPeriod( HydrusResourceRestrictedOptionsModify ):
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        nullification_period = request.parsed_request_args[ 'nullification_period' ]
+        
+        if nullification_period < HydrusNetwork.MIN_NULLIFICATION_PERIOD:
+            
+            raise HydrusExceptions.BadRequestException( 'The anonymisation period was too low. It needs to be at least {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MIN_NULLIFICATION_PERIOD ) ) )
+            
+        
+        if nullification_period > HydrusNetwork.MAX_NULLIFICATION_PERIOD:
+            
+            raise HydrusExceptions.BadRequestException( 'The anonymisation period was too high. It needs to be lower than {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MAX_NULLIFICATION_PERIOD ) ) )
+            
+        
+        old_nullification_period = self._service.GetNullificationPeriod()
+        
+        if old_nullification_period != nullification_period:
+            
+            self._service.SetNullificationPeriod( nullification_period )
+            
+            HydrusData.Print(
+                'Account {} changed the anonymisation period to from "{}" to "{}".'.format(
+                    request.hydrus_account.GetAccountKey().hex(),
+                    HydrusData.TimeDeltaToPrettyTimeDelta( old_nullification_period ),
+                    HydrusData.TimeDeltaToPrettyTimeDelta( nullification_period )
+                )
+            )
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
         
     
 class HydrusResourceRestrictedOptionsModifyUpdatePeriod( HydrusResourceRestrictedOptionsModify ):
@@ -797,7 +834,17 @@ class HydrusResourceRestrictedLockOn( HydrusResourceRestricted ):
         
         HG.server_controller.db.PauseAndDisconnect( True )
         
-        # shut down db, wait until it is done?
+        TIME_BLOCK = 0.25
+        
+        for i in range( int( 5 / TIME_BLOCK ) ):
+            
+            if not HG.server_controller.db.IsConnected():
+                
+                break
+                
+            
+            time.sleep( TIME_BLOCK )
+            
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         

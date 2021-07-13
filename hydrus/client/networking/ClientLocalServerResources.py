@@ -2,6 +2,7 @@ import collections
 import collections.abc
 import json
 import os
+import threading
 import time
 import traceback
 import typing
@@ -21,7 +22,7 @@ from hydrus.core.networking import HydrusServerResources
 from hydrus.client import ClientAPI
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientSearch
-from hydrus.client.importing import ClientImportFileSeeds
+from hydrus.client.importing import ClientImportFiles
 from hydrus.client.media import ClientMedia
 from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientNetworkingContexts
@@ -229,7 +230,7 @@ def ParseClientAPISearchPredicates( request ):
             predicate_type = ClientSearch.PREDICATE_TYPE_TAG
             
         
-        predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = tag, inclusive = inclusive ) )
+        predicates.append( ClientSearch.Predicate( predicate_type = predicate_type, value = tag, inclusive = inclusive ) )
         
     
     if system_inbox:
@@ -537,6 +538,8 @@ class HydrusResourceBooruThumbnail( HydrusResourceBooru ):
     
 class HydrusResourceClientAPI( HydrusServerResources.HydrusResource ):
     
+    BLOCKED_WHEN_BUSY = True
+    
     def _callbackParseGETArgs( self, request: HydrusServerRequest.HydrusRequest ):
         
         parsed_request_args = ParseClientAPIGETArgs( request.args )
@@ -566,10 +569,17 @@ class HydrusResourceClientAPI( HydrusServerResources.HydrusResource ):
         
         self._service.ReportRequestUsed()
         
+        HG.client_controller.ResetIdleTimerFromClientAPI()
+        
     
     def _checkService( self, request: HydrusServerRequest.HydrusRequest ):
         
         HydrusServerResources.HydrusResource._checkService( self, request )
+        
+        if self.BLOCKED_WHEN_BUSY and HG.client_busy.locked():
+            
+            raise HydrusExceptions.ServerBusyException( 'This server is busy, please try again later.' )
+            
         
         if not self._service.BandwidthOK():
             
@@ -616,6 +626,7 @@ class HydrusResourceClientAPIVersion( HydrusResourceClientAPI ):
         body_dict = {}
         
         body_dict[ 'version' ] = HC.CLIENT_API_VERSION
+        body_dict[ 'hydrus_version' ] = HC.SOFTWARE_VERSION
         
         body = json.dumps( body_dict )
         
@@ -790,6 +801,49 @@ class HydrusResourceClientAPIRestrictedAccountVerify( HydrusResourceClientAPIRes
         return response_context
         
     
+class HydrusResourceClientAPIRestrictedGetServices( HydrusResourceClientAPIRestricted ):
+    
+    def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        request.client_api_permissions.CheckAtLeastOnePermission(
+            (
+                ClientAPI.CLIENT_API_PERMISSION_ADD_FILES,
+                ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS,
+                ClientAPI.CLIENT_API_PERMISSION_MANAGE_PAGES,
+                ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES
+            )
+        )
+        
+    
+    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        jobs = [
+            ( ( HC.LOCAL_TAG, ), 'local_tags' ),
+            ( ( HC.TAG_REPOSITORY, ), 'tag_repositories' ),
+            ( ( HC.LOCAL_FILE_DOMAIN, ), 'local_files' ),
+            ( ( HC.FILE_REPOSITORY, ), 'file_repositories' ),
+            ( ( HC.COMBINED_LOCAL_FILE, ), 'all_local_files' ),
+            ( ( HC.COMBINED_FILE, ), 'all_known_files' ),
+            ( ( HC.COMBINED_TAG, ), 'all_known_tags' ),
+            ( ( HC.LOCAL_FILE_TRASH_DOMAIN, ), 'trash' )
+        ]
+        
+        body_dict = {}
+        
+        for ( service_types, name ) in jobs:
+            
+            services = HG.client_controller.services_manager.GetServices( service_types )
+            
+            body_dict[ name ] = [ { 'name' : service.GetName(), 'service_key' : service.GetServiceKey().hex() } for service in services ]
+            
+        
+        body = json.dumps( body_dict )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = HC.APPLICATION_JSON, body = body )
+        
+        return response_context
+        
+    
 class HydrusResourceClientAPIRestrictedAddFiles( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -821,24 +875,22 @@ class HydrusResourceClientAPIRestrictedAddFilesAddFile( HydrusResourceClientAPIR
         
         file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( 'quiet' )
         
-        file_import_job = ClientImportFileSeeds.FileImportJob( temp_path, file_import_options )
+        file_import_job = ClientImportFiles.FileImportJob( temp_path, file_import_options )
         
         try:
             
-            ( status, hash, note ) = file_import_job.DoWork()
+            file_import_status = file_import_job.DoWork()
             
         except:
             
-            status = CC.STATUS_ERROR
-            hash = file_import_job.GetHash()
-            note = traceback.format_exc()
+            file_import_status = ClientImportFiles.FileImportStatus( CC.STATUS_ERROR, file_import_job.GetHash(), note = traceback.format_exc() )
             
         
         body_dict = {}
         
-        body_dict[ 'status' ] = status
-        body_dict[ 'hash' ] = hash.hex()
-        body_dict[ 'note' ] = note
+        body_dict[ 'status' ] = file_import_status.status
+        body_dict[ 'hash' ] = HydrusData.BytesToNoneOrHex( file_import_status.hash )
+        body_dict[ 'note' ] = file_import_status.note
         
         body = json.dumps( body_dict )
         
@@ -1351,13 +1403,15 @@ class HydrusResourceClientAPIRestrictedAddURLsGetURLFiles( HydrusResourceClientA
         
         json_happy_url_statuses = []
         
-        for ( status, hash, note ) in url_statuses:
+        for file_import_status in url_statuses:
+            
+            file_import_status = ClientImportFiles.CheckFileImportStatus( file_import_status )
             
             d = {}
             
-            d[ 'status' ] = status
-            d[ 'hash' ] = hash.hex()
-            d[ 'note' ] = note
+            d[ 'status' ] = file_import_status.status
+            d[ 'hash' ] = HydrusData.BytesToNoneOrHex( file_import_status.hash )
+            d[ 'note' ] = file_import_status.note
             
             json_happy_url_statuses.append( d )
             
@@ -1513,10 +1567,13 @@ class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClient
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
         
+        # optionally pull this from the params, obviously
+        location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ CC.LOCAL_FILE_SERVICE_KEY ] )
+        
         tag_search_context = ClientSearch.TagSearchContext( service_key = CC.COMBINED_TAG_SERVICE_KEY )
         predicates = ParseClientAPISearchPredicates( request )
         
-        file_search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, tag_search_context = tag_search_context, predicates = predicates )
+        file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context, tag_search_context = tag_search_context, predicates = predicates )
         
         # newest first
         sort_by = ClientMedia.MediaSort( sort_type = ( 'system', CC.SORT_FILES_BY_IMPORT_TIME ), sort_order = CC.SORT_DESC )
@@ -1572,6 +1629,11 @@ class HydrusResourceClientAPIRestrictedGetFilesGetFile( HydrusResourceClientAPIR
             mime = media_result.GetMime()
             
             path = HG.client_controller.client_files_manager.GetFilePath( hash, mime )
+            
+            if not os.path.exists( path ):
+                
+                raise HydrusExceptions.FileMissingException()
+                
             
         except HydrusExceptions.FileMissingException:
             
@@ -1804,6 +1866,12 @@ class HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( HydrusResourceClien
             
             path = HG.client_controller.client_files_manager.GetThumbnailPath( media_result )
             
+            if not os.path.exists( path ):
+                
+                # not _supposed_ to happen, but it seems in odd situations it can
+                raise HydrusExceptions.FileMissingException()
+                
+            
         except HydrusExceptions.FileMissingException:
             
             raise HydrusExceptions.NotFoundException( 'Could not find that file!' )
@@ -1934,6 +2002,85 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetCookies( HydrusResourceCl
             
             HG.client_controller.pub( 'message', job_key )
             
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+class HydrusResourceClientAPIRestrictedManageCookiesSetUserAgent( HydrusResourceClientAPIRestrictedManageCookies ):
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        user_agent = request.parsed_request_args.GetValue( 'user-agent', str )
+        
+        if user_agent == '':
+            
+            from hydrus.client import ClientDefaults
+            
+            user_agent = ClientDefaults.DEFAULT_USER_AGENT
+            
+        
+        HG.client_controller.network_engine.domain_manager.SetGlobalUserAgent( user_agent )
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+class HydrusResourceClientAPIRestrictedManageDatabase( HydrusResourceClientAPIRestricted ):
+    
+    def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_MANAGE_DATABASE )
+        
+    
+class HydrusResourceClientAPIRestrictedManageDatabaseLockOn( HydrusResourceClientAPIRestrictedManageDatabase ):
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        locked = HG.client_busy.acquire( False ) # pylint: disable=E1111
+        
+        if not locked:
+            
+            raise HydrusExceptions.BadRequestException( 'The client was already locked!' )
+            
+        
+        HG.client_controller.db.PauseAndDisconnect( True )
+        
+        TIME_BLOCK = 0.25
+        
+        for i in range( int( 5 / TIME_BLOCK ) ):
+            
+            if not HG.client_controller.db.IsConnected():
+                
+                break
+                
+            
+            time.sleep( TIME_BLOCK )
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+class HydrusResourceClientAPIRestrictedManageDatabaseLockOff( HydrusResourceClientAPIRestrictedManageDatabase ):
+    
+    BLOCKED_WHEN_BUSY = False
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        try:
+            
+            HG.client_busy.release()
+            
+        except threading.ThreadError:
+            
+            raise HydrusExceptions.BadRequestException( 'The server is not busy!' )
+            
+        
+        HG.client_controller.db.PauseAndDisconnect( False )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         

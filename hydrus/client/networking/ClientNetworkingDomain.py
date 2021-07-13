@@ -474,10 +474,10 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
         
         self._second_level_domains_to_network_infrastructure_errors = collections.defaultdict( list )
         
-        from hydrus.client.importing import ClientImportOptions
+        from hydrus.client.importing.options import TagImportOptions
         
-        self._file_post_default_tag_import_options = ClientImportOptions.TagImportOptions()
-        self._watchable_default_tag_import_options = ClientImportOptions.TagImportOptions()
+        self._file_post_default_tag_import_options = TagImportOptions.TagImportOptions()
+        self._watchable_default_tag_import_options = TagImportOptions.TagImportOptions()
         
         self._url_class_keys_to_default_tag_import_options = {}
         
@@ -857,10 +857,10 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
             
             ( serialisable_url_classes, serialisable_url_class_keys_to_display, serialisable_url_class_keys_to_parser_keys, serialisable_parsing_parsers, serialisable_network_contexts_to_custom_header_dicts ) = old_serialisable_info
             
-            from hydrus.client.importing import ClientImportOptions
+            from hydrus.client.importing.options import TagImportOptions
             
-            self._file_post_default_tag_import_options = ClientImportOptions.TagImportOptions()
-            self._watchable_default_tag_import_options = ClientImportOptions.TagImportOptions()
+            self._file_post_default_tag_import_options = TagImportOptions.TagImportOptions()
+            self._watchable_default_tag_import_options = TagImportOptions.TagImportOptions()
             
             self._url_class_keys_to_default_tag_import_options = {}
             
@@ -1873,12 +1873,46 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
         self.SetURLClasses( new_url_classes )
         
     
-    def OverwriteParserLink( self, url_class, parser ):
+    def OverwriteParserLink( self, url_class_name, parser_name ):
         
         with self._lock:
             
-            url_class_key = url_class.GetClassKey()
-            parser_key = parser.GetParserKey()
+            url_class_to_link = None
+            
+            for url_class in self._url_classes:
+                
+                if url_class.GetName() == url_class_name:
+                    
+                    url_class_to_link = url_class
+                    
+                    break
+                    
+                
+            
+            if url_class_to_link is None:
+                
+                return False
+                
+            
+            parser_to_link = None
+            
+            for parser in self._parsers:
+                
+                if parser.GetName() == parser_name:
+                    
+                    parser_to_link = parser
+                    
+                    break
+                    
+                
+            
+            if parser_to_link is None:
+                
+                return False
+                
+            
+            url_class_key = url_class_to_link.GetClassKey()
+            parser_key = parser_to_link.GetParserKey()
             
             self._url_class_keys_to_parser_keys[ url_class_key ] = parser_key
             
@@ -1965,6 +1999,14 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
             self._gug_keys_to_display.update( gug_keys_to_display )
             
             self._SetDirty()
+            
+        
+    
+    def SetGlobalUserAgent( self, user_agent_string ):
+        
+        with self._lock:
+            
+            self._network_contexts_to_custom_header_dicts[ ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT ][ 'User-Agent' ] = ( user_agent_string, True, 'Set by Client API' )
             
         
     

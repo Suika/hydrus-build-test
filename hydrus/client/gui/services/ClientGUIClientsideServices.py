@@ -1,4 +1,3 @@
-import collections
 import os
 import time
 import typing
@@ -44,7 +43,7 @@ from hydrus.client.networking import ClientNetworkingJobs
 
 class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
     
-    def __init__( self, parent ):
+    def __init__( self, parent, auto_account_creation_service_key = None ):
         
         ClientGUIScrolledPanels.ManagePanel.__init__( self, parent )
         
@@ -56,7 +55,7 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             service_string = HC.service_string_lookup[ service_type ]
             
-            menu_items.append( ( 'normal', service_string, 'Add a new ' + service_string + '.', HydrusData.Call( self._Add, service_type ) ) )
+            menu_items.append( ( 'normal', service_string, 'Add a new {}.'.format( service_string ), HydrusData.Call( self._Add, service_type ) ) )
             
         
         self._add_button = ClientGUIMenuButton.MenuButton( self, 'add', menu_items = menu_items )
@@ -85,6 +84,11 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
         QP.AddToLayout( vbox, add_remove_hbox, CC.FLAGS_ON_RIGHT )
         
         self.widget().setLayout( vbox )
+        
+        if auto_account_creation_service_key is not None:
+            
+            HG.client_controller.CallLaterQtSafe( self, 1.2, 'auto-account creation spawn', self._Edit, auto_account_creation_service_key = auto_account_creation_service_key )
+            
         
     
     def _Add( self, service_type ):
@@ -184,9 +188,16 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
             
         
     
-    def _Edit( self ):
+    def _Edit( self, auto_account_creation_service_key = None ):
         
-        selected_services = self._listctrl.GetData( only_selected = True )
+        if auto_account_creation_service_key is None:
+            
+            selected_services = self._listctrl.GetData( only_selected = True )
+            
+        else:
+            
+            selected_services = [ service for service in self._listctrl.GetData( only_selected = False ) if service.GetServiceKey() == auto_account_creation_service_key ]
+            
         
         try:
             
@@ -194,7 +205,7 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit service' ) as dlg:
                     
-                    panel = EditClientServicePanel( dlg, service )
+                    panel = EditClientServicePanel( dlg, service, auto_account_creation_service_key = auto_account_creation_service_key )
                     
                     dlg.SetPanel( panel )
                     
@@ -257,7 +268,7 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
     
 class EditClientServicePanel( ClientGUIScrolledPanels.EditPanel ):
     
-    def __init__( self, parent, service ):
+    def __init__( self, parent, service, auto_account_creation_service_key = None ):
         
         ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
         
@@ -278,7 +289,7 @@ class EditClientServicePanel( ClientGUIScrolledPanels.EditPanel ):
         
         if self._service_type in HC.RESTRICTED_SERVICES:
             
-            self._panels.append( EditServiceRestrictedSubPanel( self, self._service_key, remote_panel, self._service_type, self._dictionary ) )
+            self._panels.append( EditServiceRestrictedSubPanel( self, self._service_key, remote_panel, self._service_type, self._dictionary, auto_account_creation_service_key = auto_account_creation_service_key ) )
             
         
         if self._service_type in HC.REAL_TAG_SERVICES:
@@ -545,9 +556,9 @@ class EditServiceRemoteSubPanel( ClientGUICommon.StaticBox ):
         
         def do_it():
             
-            ( host, port ) = credentials.GetAddress()
+            full_host = credentials.GetPortedAddress()
             
-            url = scheme + host + ':' + str( port ) + '/' + request
+            url = scheme + full_host + '/' + request
             
             if self._service_type == HC.IPFS:
                 
@@ -652,7 +663,7 @@ class EditServiceRemoteSubPanel( ClientGUICommon.StaticBox ):
 
 class EditServiceRestrictedSubPanel( ClientGUICommon.StaticBox ):
     
-    def __init__( self, parent, service_key, remote_panel: EditServiceRemoteSubPanel, service_type, dictionary ):
+    def __init__( self, parent, service_key, remote_panel: EditServiceRemoteSubPanel, service_type, dictionary, auto_account_creation_service_key = None ):
         
         ClientGUICommon.StaticBox.__init__( self, parent, 'hydrus network' )
         
@@ -701,6 +712,11 @@ class EditServiceRestrictedSubPanel( ClientGUICommon.StaticBox ):
         self._remote_panel.becameValidSignal.connect( self._UpdateButtons )
         self._remote_panel.becameInvalidSignal.connect( self._UpdateButtons )
         
+        if auto_account_creation_service_key is not None:
+            
+            HG.client_controller.CallLaterQtSafe( self, 1.2, 'auto-account service spawn', self._STARTFetchAutoAccountCreationAccountTypes )
+            
+        
     
     def _EnableDisableButtons( self, value ):
         
@@ -729,9 +745,9 @@ class EditServiceRestrictedSubPanel( ClientGUICommon.StaticBox ):
         
         def work_callable():
             
-            ( host, port ) = credentials.GetAddress()
+            full_host = credentials.GetPortedAddress()
             
-            url = 'https://{}:{}/auto_create_account_types'.format( host, port )
+            url = 'https://{}/auto_create_account_types'.format( full_host )
             
             network_job = ClientNetworkingJobs.NetworkJobHydrus( CC.TEST_SERVICE_KEY, 'GET', url )
             
@@ -818,11 +834,11 @@ class EditServiceRestrictedSubPanel( ClientGUICommon.StaticBox ):
         
         def work_callable():
             
-            ( host, port ) = credentials.GetAddress()
+            full_host = credentials.GetPortedAddress()
             
             # get a registration token
             
-            url = 'https://{}:{}/auto_create_registration_key?account_type_key={}'.format( host, port, account_type.GetAccountTypeKey().hex() )
+            url = 'https://{}/auto_create_registration_key?account_type_key={}'.format( full_host, account_type.GetAccountTypeKey().hex() )
             
             network_job = ClientNetworkingJobs.NetworkJobHydrus( CC.TEST_SERVICE_KEY, 'GET', url )
             
@@ -870,9 +886,9 @@ class EditServiceRestrictedSubPanel( ClientGUICommon.StaticBox ):
         
         def work_callable():
             
-            ( host, port ) = credentials.GetAddress()
+            full_host = credentials.GetPortedAddress()
             
-            url = 'https://{}:{}/access_key?registration_key={}'.format( host, port, registration_key.hex() )
+            url = 'https://{}/access_key?registration_key={}'.format( full_host, registration_key.hex() )
             
             network_job = ClientNetworkingJobs.NetworkJobHydrus( CC.TEST_SERVICE_KEY, 'GET', url )
             
@@ -1628,7 +1644,7 @@ class ReviewServicePanel( QW.QWidget ):
             
             job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
             
-            job_key.SetVariable( 'popup_title', self._service.GetName() + ': immediate sync' )
+            job_key.SetStatusTitle( self._service.GetName() + ': immediate sync' )
             job_key.SetVariable( 'popup_text_1', 'downloading' )
             
             self._controller.pub( 'message', job_key )
@@ -2180,9 +2196,9 @@ class ReviewServiceRemoteSubPanel( ClientGUICommon.StaticBox ):
         
         credentials = self._service.GetCredentials()
         
-        ( host, port ) = credentials.GetAddress()
+        full_host = credentials.GetPortedAddress()
         
-        self._address.setText( host+':'+str(port) )
+        self._address.setText( full_host )
         
         ( is_ok, status_string ) = self._service.GetStatusInfo()
         
@@ -2429,7 +2445,7 @@ class ReviewServiceRestrictedSubPanel( ClientGUICommon.StaticBox ):
         
         if len( p_s ) == 0:
             
-            menu_items.append( ( 'label', 'no special permissions', 'no special permissions', None ) )
+            menu_items.append( ( 'label', 'can only download', 'can only download', None ) )
             
         else:
             
@@ -2514,7 +2530,14 @@ class ReviewServiceRepositorySubPanel( ClientGUICommon.StaticBox ):
         
         self._content_panel = QW.QWidget( self )
         
-        self._update_period_st = ClientGUICommon.BetterStaticText( self )
+        self._repo_options_st = ClientGUICommon.BetterStaticText( self )
+        
+        tt = 'The update period is how often the repository bundles its recent uploads into a package for users to download. Anything you upload may take this long for other people to see.'
+        tt += os.linesep * 2
+        tt += 'The anonymisation period is how long it takes for account information to be scrubbed from content. After this time, server admins/janitors cannot tell which account uploaded something.'
+        
+        self._repo_options_st.setToolTip( tt )
+        
         self._metadata_st = ClientGUICommon.BetterStaticText( self )
         
         self._download_progress = ClientGUICommon.TextAndGauge( self )
@@ -2569,7 +2592,7 @@ class ReviewServiceRepositorySubPanel( ClientGUICommon.StaticBox ):
         QP.AddToLayout( hbox, self._reset_downloading_button, CC.FLAGS_CENTER_PERPENDICULAR )
         QP.AddToLayout( hbox, self._reset_processing_button, CC.FLAGS_CENTER_PERPENDICULAR )
         
-        self.Add( self._update_period_st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self.Add( self._repo_options_st, CC.FLAGS_EXPAND_PERPENDICULAR )
         self.Add( self._metadata_st, CC.FLAGS_EXPAND_PERPENDICULAR )
         self.Add( self._download_progress, CC.FLAGS_EXPAND_PERPENDICULAR )
         self.Add( self._update_downloading_paused_button, CC.FLAGS_ON_RIGHT )
@@ -2639,7 +2662,7 @@ class ReviewServiceRepositorySubPanel( ClientGUICommon.StaticBox ):
                     
                     try:
                         
-                        job_key.SetVariable( 'popup_title', 'exporting updates for ' + service.GetName() )
+                        job_key.SetStatusTitle( 'exporting updates for ' + service.GetName() )
                         HG.client_controller.pub( 'message', job_key )
                         
                         client_files_manager = HG.client_controller.client_files_manager
@@ -2748,16 +2771,31 @@ class ReviewServiceRepositorySubPanel( ClientGUICommon.StaticBox ):
         
         #
         
+        repo_options_text_components = []
+        
         try:
             
             update_period = self._service.GetUpdatePeriod()
             
-            self._update_period_st.setText( 'update period: {}'.format( HydrusData.TimeDeltaToPrettyTimeDelta( update_period ) ) )
+            repo_options_text_components.append( 'update period: {}'.format( HydrusData.TimeDeltaToPrettyTimeDelta( update_period ) ) )
             
         except HydrusExceptions.DataMissing:
             
-            self._update_period_st.setText( 'Unknown update period.' )
+            repo_options_text_components.append( 'Unknown update period.' )
             
+        
+        try:
+            
+            nullification_period = self._service.GetNullificationPeriod()
+            
+            repo_options_text_components.append( 'anonymisation period: {}'.format( HydrusData.TimeDeltaToPrettyTimeDelta( nullification_period ) ) )
+            
+        except HydrusExceptions.DataMissing:
+            
+            repo_options_text_components.append( 'Unknown anonymisation period.' )
+            
+        
+        self._repo_options_st.setText( ', '.join( repo_options_text_components ) )
         
         self._metadata_st.setText( self._service.GetNextUpdateDueString() )
         
@@ -3459,7 +3497,7 @@ class ReviewServiceRatingSubPanel( ClientGUICommon.StaticBox ):
         
         menu_items = []
         
-        menu_items.append( ( 'normal', 'for deleted files', 'delete all set ratings for files that have since been deleted', HydrusData.Call( self._ClearRatings, 'delete_for_deleted_files', 'deleted files' ) ) )
+        menu_items.append( ( 'normal', 'for deleted files', 'delete all set ratings for files that have since been deleted', HydrusData.Call(  self._ClearRatings, 'delete_for_deleted_files', 'deleted files' ) ) )
         menu_items.append( ( 'normal', 'for all non-local files', 'delete all set ratings for files that are not in this client right now', HydrusData.Call( self._ClearRatings, 'delete_for_non_local_files', 'non-local files' ) ) )
         menu_items.append( ( 'separator', None, None, None ) )
         menu_items.append( ( 'normal', 'for all files', 'delete all set ratings for all files', HydrusData.Call( self._ClearRatings, 'delete_for_all_files', 'ALL FILES' ) ) )

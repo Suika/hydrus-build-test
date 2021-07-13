@@ -977,6 +977,11 @@ class MediaList( object ):
         pass
         
     
+    def _RecalcAfterMediaRemove( self ):
+        
+        self._RecalcHashes()
+        
+    
     def _RecalcHashes( self ):
         
         self._hashes = set()
@@ -1042,7 +1047,7 @@ class MediaList( object ):
         
         self._sorted_media.remove_items( singleton_media.union( collected_media ) )
         
-        self._RecalcHashes()
+        self._RecalcAfterMediaRemove()
         
     
     def AddMedia( self, new_media ):
@@ -1732,7 +1737,7 @@ file_filter_str_lookup[ FILE_FILTER_INBOX ] = 'inbox'
 file_filter_str_lookup[ FILE_FILTER_ARCHIVE ] = 'archive'
 file_filter_str_lookup[ FILE_FILTER_FILE_SERVICE ] = 'file service'
 file_filter_str_lookup[ FILE_FILTER_LOCAL ] = 'local'
-file_filter_str_lookup[ FILE_FILTER_REMOTE ] = 'remote'
+file_filter_str_lookup[ FILE_FILTER_REMOTE ] = 'not local'
 file_filter_str_lookup[ FILE_FILTER_TAGS ] = 'tags'
 file_filter_str_lookup[ FILE_FILTER_MIME ] = 'filetype'
 
@@ -2000,6 +2005,13 @@ class MediaCollection( MediaList, Media ):
             
         
     
+    def _RecalcAfterMediaRemove( self ):
+        
+        MediaList._RecalcAfterMediaRemove( self )
+        
+        self._RecalcArchiveInbox()
+        
+    
     def _RecalcArchiveInbox( self ):
         
         self._archive = True in ( media.HasArchive() for media in self._sorted_media )
@@ -2026,6 +2038,38 @@ class MediaCollection( MediaList, Media ):
         self._file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager( preview_views, preview_viewtime, media_views, media_viewtime )
         
     
+    def _RecalcHashes( self ):
+        
+        MediaList._RecalcHashes( self )
+        
+        all_locations_managers = [ media.GetLocationsManager() for media in self._sorted_media ]
+        
+        current_to_timestamps = {}
+        deleted_to_timestamps = {}
+        
+        for service_key in HG.client_controller.services_manager.GetServiceKeys( HC.FILE_SERVICES ):
+            
+            current_timestamps = [ timestamp for timestamp in ( locations_manager.GetCurrentTimestamp( service_key ) for locations_manager in all_locations_managers ) if timestamp is not None ]
+            
+            if len( current_timestamps ) > 0:
+                
+                current_to_timestamps[ service_key ] = max( current_timestamps )
+                
+            
+            deleted_timestamps = [ timestamps for timestamps in ( locations_manager.GetDeletedTimestamps( service_key ) for locations_manager in all_locations_managers ) if timestamps is not None and timestamps[0] is not None ]
+            
+            if len( deleted_timestamps ) > 0:
+                
+                deleted_to_timestamps[ service_key ] = max( deleted_timestamps, key = lambda ts: ts[0] )
+                
+            
+        
+        pending = HydrusData.MassUnion( [ locations_manager.GetPending() for locations_manager in all_locations_managers ] )
+        petitioned = HydrusData.MassUnion( [ locations_manager.GetPetitioned() for locations_manager in all_locations_managers ] )
+        
+        self._locations_manager = ClientMediaManagers.LocationsManager( current_to_timestamps, deleted_to_timestamps, pending, petitioned )
+        
+    
     def _RecalcInternals( self ):
         
         self._RecalcHashes()
@@ -2045,15 +2089,6 @@ class MediaCollection( MediaList, Media ):
         self._has_audio = True in ( media.HasAudio() for media in self._sorted_media )
         
         self._has_notes = True in ( media.HasNotes() for media in self._sorted_media )
-        
-        all_locations_managers = [ media.GetLocationsManager() for media in self._sorted_media ]
-        
-        current_to_timestamps = { service_key : None for service_key in HydrusData.MassUnion( [ locations_manager.GetCurrent() for locations_manager in all_locations_managers ] ) }
-        deleted_to_timestamps = { service_key : ( None, None ) for service_key in HydrusData.MassUnion( [ locations_manager.GetDeleted() for locations_manager in all_locations_managers ] ) }
-        pending = HydrusData.MassUnion( [ locations_manager.GetPending() for locations_manager in all_locations_managers ] )
-        petitioned = HydrusData.MassUnion( [ locations_manager.GetPetitioned() for locations_manager in all_locations_managers ] )
-        
-        self._locations_manager = ClientMediaManagers.LocationsManager( current_to_timestamps, deleted_to_timestamps, pending, petitioned )
         
         self._RecalcRatings()
         self._RecalcFileViewingStats()
@@ -2091,6 +2126,16 @@ class MediaCollection( MediaList, Media ):
         MediaList.DeletePending( self, service_key )
         
         self._RecalcInternals()
+        
+    
+    def GetCurrentTimestamp( self, service_key: bytes ) -> typing.Optional[ int ]:
+        
+        return self._locations_manager.GetCurrentTimestamp( service_key )
+        
+    
+    def GetDeletedTimestamps( self, service_key: bytes ) -> typing.Tuple[ typing.Optional[ int ], typing.Optional[ int ] ]:
+        
+        return self._locations_manager.GetDeletedTimestamps( service_key )
         
     
     def GetDisplayMedia( self ):
@@ -2207,16 +2252,6 @@ class MediaCollection( MediaList, Media ):
     def GetTagsManager( self ):
         
         return self._tags_manager
-        
-    
-    def GetCurrentTimestamp( self, service_key: bytes ) -> typing.Optional[ int ]:
-        
-        return None
-        
-    
-    def GetDeletedTimestamps( self, service_key: bytes ) -> typing.Tuple[ typing.Optional[ int ], typing.Optional[ int ] ]:
-        
-        return ( None, None )
         
     
     def HasArchive( self ):
@@ -2681,7 +2716,7 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_MEDIA_SORT
     SERIALISABLE_NAME = 'Media Sort'
-    SERIALISABLE_VERSION = 1
+    SERIALISABLE_VERSION = 2
     
     def __init__( self, sort_type = None, sort_order = None ):
         
@@ -2693,6 +2728,17 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
         if sort_order is None:
             
             sort_order = CC.SORT_ASC
+            
+        
+        ( sort_metatype, sort_data ) = sort_type
+        
+        if sort_metatype == 'namespaces':
+            
+            ( namespaces, tag_display_type ) = sort_data
+            
+            sort_data = ( tuple( namespaces ), tag_display_type )
+            
+            sort_type = ( sort_metatype, sort_data )
             
         
         self.sort_type = sort_type
@@ -2731,7 +2777,9 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
             
         elif sort_metatype == 'namespaces':
             
-            sort_data = tuple( serialisable_sort_data )
+            ( namespaces, tag_display_type ) = serialisable_sort_data
+            
+            sort_data = ( tuple( namespaces ), tag_display_type )
             
         elif sort_metatype == 'rating':
             
@@ -2739,6 +2787,24 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
             
         
         self.sort_type = ( sort_metatype, sort_data )
+        
+    
+    def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
+        
+        if version == 1:
+            
+            ( sort_metatype, serialisable_sort_data, sort_order ) = old_serialisable_info
+            
+            if sort_metatype == 'namespaces':
+                
+                namespaces = serialisable_sort_data
+                serialisable_sort_data = ( namespaces, ClientTags.TAG_DISPLAY_ACTUAL )
+                
+            
+            new_serialisable_info = ( sort_metatype, serialisable_sort_data, sort_order )
+            
+            return ( 2, new_serialisable_info )
+            
         
     
     def CanAsc( self ):
@@ -2754,6 +2820,22 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
             
         
         return True
+        
+    
+    def GetNamespaces( self ):
+        
+        ( sort_metadata, sort_data ) = self.sort_type
+        
+        if sort_metadata == 'namespaces':
+            
+            ( namespaces, tag_display_type ) = sort_data
+            
+            return list( namespaces )
+            
+        else:
+            
+            return []
+            
         
     
     def GetSortKeyAndReverse( self, file_service_key ):
@@ -2975,7 +3057,7 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
                     
                     tags_manager = x.GetTagsManager()
                     
-                    return len( tags_manager.GetCurrentAndPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA ) )
+                    return len( tags_manager.GetCurrentAndPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_ACTUAL ) )
                     
                 
             elif sort_data == CC.SORT_FILES_BY_MIME:
@@ -3010,13 +3092,13 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
             
         elif sort_metadata == 'namespaces':
             
-            namespaces = sort_data
+            ( namespaces, tag_display_type ) = sort_data
             
             def sort_key( x ):
                 
                 x_tags_manager = x.GetTagsManager()
                 
-                return [ x_tags_manager.GetComparableNamespaceSlice( ( namespace, ), ClientTags.TAG_DISPLAY_SINGLE_MEDIA ) for namespace in namespaces ]
+                return [ x_tags_manager.GetComparableNamespaceSlice( ( namespace, ), tag_display_type ) for namespace in namespaces ]
                 
             
         elif sort_metadata == 'rating':
@@ -3089,7 +3171,7 @@ class MediaSort( HydrusSerialisable.SerialisableBase ):
             
         elif sort_metatype == 'namespaces':
             
-            namespaces = sort_data
+            ( namespaces, tag_display_type ) = sort_data
             
             sort_string += 'tags: ' + '-'.join( namespaces )
             

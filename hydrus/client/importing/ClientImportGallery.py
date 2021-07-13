@@ -12,7 +12,8 @@ from hydrus.client import ClientDownloading
 from hydrus.client.importing import ClientImportFileSeeds
 from hydrus.client.importing import ClientImportGallerySeeds
 from hydrus.client.importing import ClientImporting
-from hydrus.client.importing import ClientImportOptions
+from hydrus.client.importing.options import FileImportOptions
+from hydrus.client.importing.options import TagImportOptions
 from hydrus.client.networking import ClientNetworkingJobs
 
 class GalleryImport( HydrusSerialisable.SerialisableBase ):
@@ -63,7 +64,7 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
         
         self._file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( 'loud' )
         
-        self._tag_import_options = ClientImportOptions.TagImportOptions( is_default = True )
+        self._tag_import_options = TagImportOptions.TagImportOptions( is_default = True )
         
         self._gallery_seed_log = ClientImportGallerySeeds.GallerySeedLog()
         
@@ -83,6 +84,8 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
         self._gallery_status_can_change_timestamp = 0
         
         self._all_work_finished = False
+        
+        self._have_started = False
         
         self._file_network_job = None
         self._gallery_network_job = None
@@ -555,7 +558,7 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
             fsc = self._file_seed_cache
             
         
-        file_import_options = ClientImportOptions.FileImportOptions()
+        file_import_options = FileImportOptions.FileImportOptions()
         
         file_import_options.SetPresentationOptions( True, False, False )
         
@@ -781,14 +784,24 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
     
     def Start( self, page_key, publish_to_page ):
         
-        self._page_key = page_key
-        self._publish_to_page = publish_to_page
-        
-        self._files_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
-        self._gallery_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnGallery )
-        
-        self._files_repeating_job.SetThreadSlotType( 'gallery_files' )
-        self._gallery_repeating_job.SetThreadSlotType( 'gallery_search' )
+        with self._lock:
+            
+            if self._have_started:
+                
+                return
+                
+            
+            self._page_key = page_key
+            self._publish_to_page = publish_to_page
+            
+            self._files_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
+            self._gallery_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnGallery )
+            
+            self._files_repeating_job.SetThreadSlotType( 'gallery_files' )
+            self._gallery_repeating_job.SetThreadSlotType( 'gallery_search' )
+            
+            self._have_started = True
+            
         
     
     def REPEATINGWorkOnFiles( self ):
@@ -946,8 +959,6 @@ class MultipleGalleryImport( HydrusSerialisable.SerialisableBase ):
         
         self._highlighted_gallery_import_key = None
         
-        new_options = HG.client_controller.new_options
-        
         self._file_limit = HC.options[ 'gallery_file_limit' ]
         
         self._start_file_queues_paused = False
@@ -955,7 +966,7 @@ class MultipleGalleryImport( HydrusSerialisable.SerialisableBase ):
         self._merge_simultaneous_pends_to_one_importer = False
         
         self._file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( 'loud' )
-        self._tag_import_options = ClientImportOptions.TagImportOptions( is_default = True )
+        self._tag_import_options = TagImportOptions.TagImportOptions( is_default = True )
         
         self._gallery_imports = HydrusSerialisable.SerialisableList()
         
@@ -965,6 +976,8 @@ class MultipleGalleryImport( HydrusSerialisable.SerialisableBase ):
         self._status_cache = ClientImportFileSeeds.FileSeedCacheStatus()
         
         self._last_time_imports_changed = HydrusData.GetNowPrecise()
+        
+        self._have_started = False
         
         self._last_pubbed_value_range = ( 0, 0 )
         self._next_pub_value_check_time = 0
@@ -1332,16 +1345,57 @@ class MultipleGalleryImport( HydrusSerialisable.SerialisableBase ):
             
             for gallery_import in self._gallery_imports:
                 
-                ( value, range ) = gallery_import.GetValueRange()
+                ( v, r ) = gallery_import.GetValueRange()
                 
-                if value != range:
+                if v != r:
                     
-                    total_value += value
-                    total_range += range
+                    total_value += v
+                    total_range += r
                     
                 
             
             return ( total_value, total_range )
+            
+        
+    
+    def PendSubscriptionGapDownloader( self, gug_key_and_name, query_text, file_limit ):
+        
+        with self._lock:
+            
+            gug = HG.client_controller.network_engine.domain_manager.GetGUG( gug_key_and_name )
+            
+            if gug is None:
+                
+                HydrusData.ShowText( 'Could not find a Gallery URL Generator for "{}"!'.format( self._gug_key_and_name[1] ) )
+                
+                return
+                
+            
+            initial_search_urls = gug.GenerateGalleryURLs( query_text )
+            
+            if len( initial_search_urls ) == 0:
+                
+                HydrusData.ShowText( 'The Gallery URL Generator "{}" did not produce any URLs!'.format( self._gug_key_and_name[1] ) )
+                
+                return
+                
+            
+            gallery_import = GalleryImport( query = query_text, source_name = gug_key_and_name[1], initial_search_urls = initial_search_urls, start_file_queue_paused = self._start_file_queues_paused, start_gallery_queue_paused = self._start_gallery_queues_paused )
+            
+            gallery_import.SetFileLimit( file_limit )
+            
+            gallery_import.SetFileImportOptions( self._file_import_options )
+            gallery_import.SetTagImportOptions( self._tag_import_options )
+            
+            publish_to_page = False
+            
+            gallery_import.Start( self._page_key, publish_to_page )
+            
+            self._AddGalleryImport( gallery_import )
+            
+            ClientImporting.WakeRepeatingJob( self._importers_repeating_job )
+            
+            self._SetDirty()
             
         
     
@@ -1491,17 +1545,24 @@ class MultipleGalleryImport( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
+            if self._have_started:
+                
+                return
+                
+            
             self._page_key = page_key
             
-        
-        # set a 2s period so the page value/range is breddy snappy
-        self._importers_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), 2.0, self.REPEATINGWorkOnImporters )
-        
-        for gallery_import in self._gallery_imports:
+            # set a 2s period so the page value/range is breddy snappy
+            self._importers_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), 2.0, self.REPEATINGWorkOnImporters )
             
-            publish_to_page = gallery_import.GetGalleryImportKey() == self._highlighted_gallery_import_key
+            for gallery_import in self._gallery_imports:
+                
+                publish_to_page = gallery_import.GetGalleryImportKey() == self._highlighted_gallery_import_key
+                
+                gallery_import.Start( page_key, publish_to_page )
+                
             
-            gallery_import.Start( page_key, publish_to_page )
+            self._have_started = True
             
         
     

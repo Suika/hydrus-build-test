@@ -32,6 +32,7 @@ from hydrus.client import ClientThreading
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui import ClientGUISplash
 from hydrus.client.gui.lists import ClientGUIListManager
+from hydrus.client.importing import ClientImportFiles
 from hydrus.client.metadata import ClientTags
 from hydrus.client.metadata import ClientTagsHandling
 from hydrus.client.networking import ClientNetworking
@@ -172,6 +173,10 @@ class Controller( object ):
         self.app = win
         self.win = win
         self.only_run = only_run
+        self.run_finished = False
+        self.was_successful = False
+        
+        self._test_db = None
         
         self.db_dir = tempfile.mkdtemp()
         
@@ -234,6 +239,7 @@ class Controller( object ):
         services.append( ClientServices.GenerateService( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, HC.LOCAL_TAG, 'my tags' ) )
         services.append( ClientServices.GenerateService( self.example_tag_repo_service_key, HC.TAG_REPOSITORY, 'example tag repo' ) )
         services.append( ClientServices.GenerateService( CC.COMBINED_TAG_SERVICE_KEY, HC.COMBINED_TAG, 'all known tags' ) )
+        services.append( ClientServices.GenerateService( CC.COMBINED_FILE_SERVICE_KEY, HC.COMBINED_FILE, 'all known files' ) )
         services.append( ClientServices.GenerateService( LOCAL_RATING_LIKE_SERVICE_KEY, HC.LOCAL_RATING_LIKE, 'example local rating like service' ) )
         services.append( ClientServices.GenerateService( LOCAL_RATING_NUMERICAL_SERVICE_KEY, HC.LOCAL_RATING_NUMERICAL, 'example local rating numerical service' ) )
         
@@ -390,8 +396,6 @@ class Controller( object ):
         
         job_key = ClientThreading.JobKey()
         
-        job_key.Begin()
-        
         QP.CallAfter( qt_code, win, job_key )
         
         while not job_key.IsDone():
@@ -432,9 +436,9 @@ class Controller( object ):
     
     CallToThreadLongRunning = CallToThread
     
-    def CallAfterQtSafe( self, window, func, *args, **kwargs ):
+    def CallAfterQtSafe( self, window, label, func, *args, **kwargs ):
         
-        self.CallLaterQtSafe( window, 0, func, *args, **kwargs )
+        self.CallLaterQtSafe( window, 0, label, func, *args, **kwargs )
         
     
     def CallLater( self, initial_delay, func, *args, **kwargs ):
@@ -448,18 +452,20 @@ class Controller( object ):
         return job
         
     
-    def CallLaterQtSafe( self, window, initial_delay, func, *args, **kwargs ):
+    def CallLaterQtSafe( self, window, initial_delay, label, func, *args, **kwargs ):
         
         call = HydrusData.Call( func, *args, **kwargs )
         
-        job = ClientThreading.QtAwareJob(self, self._job_scheduler, window, initial_delay, call)
+        call.SetLabel( label )
+        
+        job = ClientThreading.QtAwareJob( self, self._job_scheduler, window, initial_delay, call )
         
         self._job_scheduler.AddJob( job )
         
         return job
         
     
-    def CallRepeating( self, initial_delay, period, func, *args, **kwargs ):
+    def CallRepeating( self, initial_delay, period, label, func, *args, **kwargs ):
         
         call = HydrusData.Call( func, *args, **kwargs )
         
@@ -470,7 +476,7 @@ class Controller( object ):
         return job
         
     
-    def CallRepeatingQtSafe( self, window, initial_delay, period, func, *args, **kwargs ):
+    def CallRepeatingQtSafe( self, window, initial_delay, period, label, func, *args, **kwargs ):
         
         call = HydrusData.Call( func, *args, **kwargs )
         
@@ -479,6 +485,11 @@ class Controller( object ):
         self._job_scheduler.AddJob( job )
         
         return job
+        
+    
+    def ClearTestDB( self ):
+        
+        self._test_db = None
         
     
     def ClearWrites( self, name ):
@@ -598,6 +609,11 @@ class Controller( object ):
         return True
         
     
+    def IsConnected( self ):
+        
+        False
+        
+    
     def IsCurrentPage( self, page_key ):
         
         return False
@@ -640,6 +656,11 @@ class Controller( object ):
     
     def Read( self, name, *args, **kwargs ):
         
+        if self._test_db is not None:
+            
+            return self._test_db.Read( name, *args, **kwargs )
+            
+        
         try:
             
             if ( name, args ) in self._param_reads:
@@ -675,7 +696,15 @@ class Controller( object ):
         pass
         
     
-    def ResetIdleTimer( self ): pass
+    def ResetIdleTimer( self ):
+        
+        pass
+        
+    
+    def ResetIdleTimerFromClientAPI( self ):
+        
+        pass
+        
     
     def Run( self, window ):
         
@@ -822,7 +851,10 @@ class Controller( object ):
             
             try:
                 
-                runner.run( suite )
+                result = runner.run( suite )
+                
+                self.run_finished = True
+                self.was_successful = result.wasSuccessful()
                 
             finally:
                 
@@ -850,6 +882,11 @@ class Controller( object ):
     def SetStatusBarDirty( self ):
         
         pass
+        
+    
+    def SetTestDB( self, db ):
+        
+        self._test_db = db
         
     
     def SetWebCookies( self, name, value ):
@@ -886,6 +923,11 @@ class Controller( object ):
     
     def Write( self, name, *args, **kwargs ):
         
+        if self._test_db is not None:
+            
+            return self._test_db.Write( name, *args, **kwargs )
+            
+        
         self._writes[ name ].append( ( args, kwargs ) )
         
     
@@ -903,7 +945,14 @@ class Controller( object ):
                 
             else:
                 
-                return ( CC.STATUS_SUCCESSFUL_AND_NEW, 'test note' )
+                h = file_import_job.GetHash()
+                
+                if h is None:
+                    
+                    h = os.urandom( 32 )
+                    
+                
+                return ClientImportFiles.FileImportStatus( CC.STATUS_SUCCESSFUL_AND_NEW, h, note = 'test note' )
                 
             
         

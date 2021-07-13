@@ -43,6 +43,17 @@ def BuildKeyToSetDict( pairs ):
     
     return d
     
+def BytesToNoneOrHex( b: typing.Optional[ bytes ] ):
+    
+    if b is None:
+        
+        return None
+        
+    else:
+        
+        return b.hex()
+        
+    
 def CalculateScoreFromRating( count, rating ):
     
     # https://www.evanmiller.org/how-not-to-sort-by-average-rating.html
@@ -1584,6 +1595,8 @@ class Call( object ):
     
     def __init__( self, func, *args, **kwargs ):
         
+        self._label = None
+        
         self._func = func
         self._args = args
         self._kwargs = kwargs
@@ -1596,7 +1609,34 @@ class Call( object ):
     
     def __repr__( self ):
         
-        return 'Call: ' + repr( ( self._func, self._args, self._kwargs ) )
+        label = self._GetLabel()
+        
+        return 'Call: {}'.format( label )
+        
+    
+    def _GetLabel( self ) -> str:
+        
+        if self._label is None:
+            
+            # this can actually cause an error with Qt objects that are dead or from the wrong thread, wew!
+            label = '{}( {}, {} )'.format( self._func, self._args, self._kwargs )
+            
+        else:
+            
+            label = self._label
+            
+        
+        return label
+        
+    
+    def GetLabel( self ) -> str:
+        
+        return self._GetLabel()
+        
+    
+    def SetLabel( self, label: str ):
+        
+        self._label = label
         
     
 class ContentUpdate( object ):
@@ -1761,6 +1801,11 @@ class ContentUpdate( object ):
     def IsInboxRelated( self ):
         
         return self._action in ( HC.CONTENT_UPDATE_ARCHIVE, HC.CONTENT_UPDATE_INBOX )
+        
+    
+    def SetRow( self, row ):
+        
+        self._row = row
         
     
     def ToTuple( self ):

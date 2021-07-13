@@ -26,7 +26,7 @@ from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.importing import ClientImportFileSeeds
-from hydrus.client.importing import ClientImportOptions
+from hydrus.client.importing.options import FileImportOptions
 
 class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
     
@@ -184,19 +184,22 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             ClientGUIMenus.AppendMenuItem( menu, 'open selected import files in a new page', 'Show all the known selected files in a new thumbnail page. This is complicated, so cannot always be guaranteed, even if the import says \'success\'.', self._ShowSelectionInNewPage )
             
             ClientGUIMenus.AppendSeparator( menu )
-
+            
+        
         ClientGUIMenus.AppendMenuItem( menu, 'copy sources', 'Copy all the selected sources to clipboard.', self._CopySelectedFileSeedData )
         ClientGUIMenus.AppendMenuItem( menu, 'copy notes', 'Copy all the selected notes to clipboard.', self._CopySelectedNotes )
         
         ClientGUIMenus.AppendSeparator( menu )
-
+        
         ClientGUIMenus.AppendMenuItem( menu, 'open sources', 'Open all the selected sources in your file explorer or web browser.', self._OpenSelectedFileSeedData )
         
         ClientGUIMenus.AppendSeparator( menu )
-
+        
         ClientGUIMenus.AppendMenuItem( menu, 'try again', 'Reset the progress of all the selected imports.', HydrusData.Call( self._SetSelected, CC.STATUS_UNKNOWN ) )
+        
         ClientGUIMenus.AppendMenuItem( menu, 'skip', 'Skip all the selected imports.', HydrusData.Call( self._SetSelected, CC.STATUS_SKIPPED ) )
-        ClientGUIMenus.AppendMenuItem( menu, 'delete from list', 'Remove all the selected imports.', self._DeleteSelected )
+        
+        ClientGUIMenus.AppendMenuItem( menu, 'delete from list', 'Remove all the selected imports.', HydrusData.Call( self._DeleteSelected ) )
         
         return menu
         
@@ -365,17 +368,17 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             
         
     
-class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
+class FileSeedCacheButton( ClientGUICommon.BetterButton ):
     
     def __init__( self, parent, controller, file_seed_cache_get_callable, file_seed_cache_set_callable = None ):
         
-        ClientGUICommon.BetterBitmapButton.__init__( self, parent, CC.global_pixmaps().listctrl, self._ShowFileSeedCacheFrame )
+        ClientGUICommon.BetterButton.__init__( self, parent, 'file log', self._ShowFileSeedCacheFrame )
         
         self._controller = controller
         self._file_seed_cache_get_callable = file_seed_cache_get_callable
         self._file_seed_cache_set_callable = file_seed_cache_set_callable
         
-        self.setToolTip( 'open detailed file import status--right-click for quick actions, if applicable' )
+        self.setToolTip( 'open detailed file log--right-click for quick actions, if applicable' )
         
         self._widget_event_filter = QP.WidgetEventFilter( self )
         
@@ -538,11 +541,13 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
         
         tlw = self.window()
         
+        title = 'file log'
+        
         if isinstance( tlw, QP.Dialog ):
             
             if self._file_seed_cache_set_callable is None: # throw up a dialog that edits the file_seed cache in place
                 
-                with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, 'file import status' ) as dlg:
+                with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, title ) as dlg:
                     
                     panel = EditFileSeedCachePanel( dlg, self._controller, file_seed_cache )
                     
@@ -555,7 +560,7 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
                 
                 dupe_file_seed_cache = file_seed_cache.Duplicate()
                 
-                with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'file import status' ) as dlg:
+                with ClientGUITopLevelWindowsPanels.DialogEdit( self, title ) as dlg:
                     
                     panel = EditFileSeedCachePanel( dlg, self._controller, dupe_file_seed_cache )
                     
@@ -570,7 +575,6 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
             
         else: # throw up a frame that edits the file_seed cache in place
             
-            title = 'file import status'
             frame_key = 'file_import_status'
             
             frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, title, frame_key )
@@ -591,7 +595,7 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
             
         elif show == 'new':
             
-            file_import_options = ClientImportOptions.FileImportOptions()
+            file_import_options = FileImportOptions.FileImportOptions()
             
             file_import_options.SetPresentationOptions( True, False, False )
             
@@ -616,7 +620,7 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
         
         if event.button() != QC.Qt.RightButton:
             
-            ClientGUICommon.BetterBitmapButton.mouseReleaseEvent( self, event )
+            ClientGUICommon.BetterButton.mouseReleaseEvent( self, event )
             
             return
             

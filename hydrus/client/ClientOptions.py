@@ -6,15 +6,12 @@ from qtpy import QtGui as QG
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusData
-from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
-from hydrus.client import ClientDownloading
 from hydrus.client import ClientDuplicates
-from hydrus.client.importing import ClientImporting
 
 class ClientOptions( HydrusSerialisable.SerialisableBase ):
     
@@ -235,6 +232,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         
         self._dictionary[ 'booleans' ][ 'show_session_size_warnings' ] = True
         
+        self._dictionary[ 'booleans' ][ 'delete_lock_for_archived_files' ] = False
+        
         #
         
         self._dictionary[ 'colours' ] = HydrusSerialisable.SerialisableDictionary()
@@ -314,7 +313,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         
         from hydrus.client.gui.canvas import ClientGUICanvas
         
-        self._dictionary[ 'integers' ][ 'media_viewer_zoom_center' ] = ClientGUICanvas.ZOOM_CENTERPOINT_VIEWER_CENTER
+        self._dictionary[ 'integers' ][ 'media_viewer_zoom_center' ] = ClientGUICanvas.ZOOM_CENTERPOINT_MOUSE
         
         self._dictionary[ 'integers' ][ 'last_session_save_period_minutes' ] = 5
         
@@ -353,6 +352,9 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'integers' ][ 'thumbnail_cache_timeout' ] = 86400
         self._dictionary[ 'integers' ][ 'image_cache_timeout' ] = 600
         self._dictionary[ 'integers' ][ 'image_tile_cache_timeout' ] = 300
+        
+        self._dictionary[ 'integers' ][ 'image_cache_storage_limit_percentage' ] = 25
+        self._dictionary[ 'integers' ][ 'image_cache_prefetch_limit_percentage' ] = 10
         
         self._dictionary[ 'integers' ][ 'media_viewer_prefetch_delay_base_ms' ] = 100
         self._dictionary[ 'integers' ][ 'media_viewer_prefetch_num_previous' ] = 2
@@ -403,8 +405,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         
         self._dictionary[ 'noneable_integers' ][ 'num_recent_tags' ] = 20
         
-        self._dictionary[ 'noneable_integers' ][ 'maintenance_vacuum_period_days' ] = 30
-        
         self._dictionary[ 'noneable_integers' ][ 'duplicate_background_switch_intensity' ] = 3
         
         self._dictionary[ 'noneable_integers' ][ 'last_review_bandwidth_search_distance' ] = 7 * 86400
@@ -417,6 +417,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'noneable_integers' ][ 'subscription_file_error_cancel_threshold' ] = 5
         
         self._dictionary[ 'noneable_integers' ][ 'media_viewer_cursor_autohide_time_ms' ] = 700
+        
+        self._dictionary[ 'noneable_integers' ][ 'idle_mode_client_api_timeout' ] = None
         
         #
         
@@ -468,6 +470,18 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         #
         
         self._dictionary[ 'favourite_tag_filters' ] = HydrusSerialisable.SerialisableDictionary()
+        
+        #
+        
+        from hydrus.client.media import ClientMedia
+        from hydrus.client.metadata import ClientTags
+        
+        default_namespace_sorts = HydrusSerialisable.SerialisableList()
+        
+        default_namespace_sorts.append( ClientMedia.MediaSort( sort_type = ( 'namespaces', ( ( 'series', 'creator', 'title', 'volume', 'chapter', 'page' ), ClientTags.TAG_DISPLAY_ACTUAL ) ) ) )
+        default_namespace_sorts.append( ClientMedia.MediaSort( sort_type = ( 'namespaces', ( ( 'creator', 'series', 'title', 'volume', 'chapter', 'page' ), ClientTags.TAG_DISPLAY_ACTUAL ) ) ) )
+        
+        self._dictionary[ 'default_namespace_sorts' ] = default_namespace_sorts
         
         #
         
@@ -543,9 +557,9 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         present_already_in_inbox_files = False
         present_already_in_archive_files = False
         
-        from hydrus.client.importing import ClientImportOptions
+        from hydrus.client.importing.options import FileImportOptions
         
-        quiet_file_import_options = ClientImportOptions.FileImportOptions()
+        quiet_file_import_options = FileImportOptions.FileImportOptions()
         
         quiet_file_import_options.SetPreImportOptions( exclude_deleted, do_not_check_known_urls_before_importing, do_not_check_hashes_before_importing, allow_decompression_bombs, min_size, max_size, max_gif_size, min_resolution, max_resolution )
         quiet_file_import_options.SetPostImportOptions( automatic_archive, associate_source_urls )
@@ -557,7 +571,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         present_already_in_inbox_files = True
         present_already_in_archive_files = True
         
-        loud_file_import_options = ClientImportOptions.FileImportOptions()
+        loud_file_import_options = FileImportOptions.FileImportOptions()
         
         loud_file_import_options.SetPreImportOptions( exclude_deleted, do_not_check_known_urls_before_importing, do_not_check_hashes_before_importing, allow_decompression_bombs, min_size, max_size, max_gif_size, min_resolution, max_resolution )
         loud_file_import_options.SetPostImportOptions( automatic_archive, associate_source_urls )
@@ -894,6 +908,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             return self._GetDefaultMediaViewOptions()
+            
+        
+    
+    def GetDefaultNamespaceSorts( self ):
+        
+        with self._lock:
+            
+            return list( self._dictionary[ 'default_namespace_sorts' ] )
             
         
     
@@ -1306,6 +1328,21 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ] = checker_options
+            
+        
+    
+    def SetDefaultNamespaceSorts( self, namespace_sorts ):
+        
+        with self._lock:
+            
+            default_namespace_sorts = HydrusSerialisable.SerialisableList()
+            
+            for namespace_sort in namespace_sorts:
+                
+                default_namespace_sorts.append( namespace_sort )
+                
+            
+            self._dictionary[ 'default_namespace_sorts' ] = default_namespace_sorts
             
         
     

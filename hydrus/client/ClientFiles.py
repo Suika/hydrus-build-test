@@ -46,9 +46,9 @@ regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL ] = 'reg
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_OTHER_HASHES ] = 'regenerate non-standard hashes'
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES ] = 'delete duplicate neighbours with incorrect file extension'
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE ] = 'if file is missing, remove record'
-regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_URL ] = 'if file is missing and has url, try to redownload'
+regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_URL ] = 'if file is missing AND has url, try to redownload'
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA ] = 'if file is missing/incorrect, move file out and remove record'
-regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_URL ] = 'if file is missing/incorrect and has url, move file out and try to redownload'
+regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_URL ] = 'if file is missing/incorrect AND has url, move file out and try to redownload'
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE ] = 'if file is incorrect, move file out'
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS ] = 'fix file read/write permissions'
 regen_file_enum_to_str_lookup[ REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP ] = 'check for membership in the similar files search system'
@@ -779,7 +779,7 @@ class ClientFilesManager( object ):
             
             job_key = ClientThreading.JobKey( cancellable = True )
             
-            job_key.SetVariable( 'popup_title', 'clearing orphans' )
+            job_key.SetStatusTitle( 'clearing orphans' )
             job_key.SetVariable( 'popup_text_1', 'preparing' )
             
             self._controller.pub( 'message', job_key )
@@ -1071,50 +1071,45 @@ class ClientFilesManager( object ):
         
         with self._rwlock.read:
             
-            return self.LocklessGetFilePath( hash, mime = mime, check_file_exists = check_file_exists )
+            if HG.file_report_mode:
+                
+                HydrusData.ShowText( 'File path request: ' + str( ( hash, mime ) ) )
+                
+            
+            if mime is None:
+                
+                ( path, mime ) = self._LookForFilePath( hash )
+                
+            else:
+                
+                path = self._GenerateExpectedFilePath( hash, mime )
+                
+                if check_file_exists and not os.path.exists( path ):
+                    
+                    try:
+                        
+                        # let's see if the file exists, but with the wrong ext!
+                        
+                        ( actual_path, old_mime ) = self._LookForFilePath( hash )
+                        
+                    except HydrusExceptions.FileMissingException:
+                        
+                        raise HydrusExceptions.FileMissingException( 'No file found at path {}!'.format( path ) )
+                        
+                    
+                    self._ChangeFileExt( hash, old_mime, mime )
+                    
+                    # we have now fixed the path, it is good to return
+                    
+                
+            
+            return path
             
         
     
     def GetMissing( self ):
         
         return self._missing_locations
-        
-    
-    def LocklessGetFilePath( self, hash, mime = None, check_file_exists = True ):
-        
-        if HG.file_report_mode:
-            
-            HydrusData.ShowText( 'File path request: ' + str( ( hash, mime ) ) )
-            
-        
-        if mime is None:
-            
-            ( path, mime ) = self._LookForFilePath( hash )
-            
-        else:
-            
-            path = self._GenerateExpectedFilePath( hash, mime )
-            
-            if check_file_exists and not os.path.exists( path ):
-                
-                try:
-                    
-                    # let's see if the file exists, but with the wrong ext!
-                    
-                    ( actual_path, old_mime ) = self._LookForFilePath( hash )
-                    
-                except HydrusExceptions.FileMissingException:
-                    
-                    raise HydrusExceptions.FileMissingException( 'No file found at path {}!'.format( path ) )
-                    
-                
-                self._ChangeFileExt( hash, old_mime, mime )
-                
-                # we have now fixed the path, it is good to return
-                
-            
-        
-        return path
         
     
     def GetThumbnailPath( self, media ):
@@ -1749,9 +1744,6 @@ class FilesMaintenanceManager( object ):
     
     def _RunJob( self, media_results, job_type, job_key, job_done_hook = None ):
         
-        num_bad_files = 0
-        num_thumb_refits = 0
-        
         next_gc_collect = HydrusData.GetNow() + 10
         
         try:
@@ -1801,11 +1793,20 @@ class FilesMaintenanceManager( object ):
                         
                     elif job_type == REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL:
                         
+                        if not job_key.HasVariable( 'num_thumb_refits' ):
+                            
+                            job_key.SetVariable( 'num_thumb_refits', 0 ) 
+                            
+                        
+                        num_thumb_refits = job_key.GetIfHasVariable( 'num_thumb_refits' )
+                        
                         was_regenerated = self._RegenFileThumbnailRefit( media_result )
                         
                         if was_regenerated:
                             
                             num_thumb_refits += 1
+                            
+                            job_key.SetVariable( 'num_thumb_refits', num_thumb_refits )
                             
                         
                         job_key.SetVariable( 'popup_text_2', 'thumbs needing regen: {}'.format( HydrusData.ToHumanInt( num_thumb_refits ) ) )
@@ -1828,11 +1829,20 @@ class FilesMaintenanceManager( object ):
                         
                     elif job_type in ( REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_URL, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_URL, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE ):
                         
+                        if not job_key.HasVariable( 'num_bad_files' ):
+                            
+                            job_key.SetVariable( 'num_bad_files', 0 ) 
+                            
+                        
+                        num_bad_files = job_key.GetIfHasVariable( 'num_bad_files' )
+                        
                         file_was_bad = self._CheckFileIntegrity( media_result, job_type )
                         
                         if file_was_bad:
                             
                             num_bad_files += 1
+                            
+                            job_key.SetVariable( 'num_bad_files', num_bad_files ) 
                             
                         
                         job_key.SetVariable( 'popup_text_2', 'missing or invalid files: {}'.format( HydrusData.ToHumanInt( num_bad_files ) ) )
@@ -1928,7 +1938,7 @@ class FilesMaintenanceManager( object ):
         
         self._reset_background_event.set()
         
-        job_key.SetVariable( 'popup_title', 'regenerating file data' )
+        job_key.SetStatusTitle( 'regenerating file data' )
         
         message_pubbed = False
         work_done = False
@@ -2157,7 +2167,7 @@ class FilesMaintenanceManager( object ):
             job_key.SetVariable( 'popup_gauge_1', ( num_jobs_done, total_num_jobs_to_do ) )
             
         
-        job_key.SetVariable( 'popup_title', 'regenerating file data' )
+        job_key.SetStatusTitle( 'regenerating file data' )
         
         if pub_job_key:
             
