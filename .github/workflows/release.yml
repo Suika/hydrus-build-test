@@ -50,7 +50,7 @@ jobs:
           hdiutil convert "$temp_dmg" -format UDZO -o HydrusNetwork.dmg
       - 
         name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2.2.1
+        uses: actions/upload-artifact@v2.2.4
         with:
           name: MacOS-DMG
           path: HydrusNetwork.dmg
@@ -121,7 +121,7 @@ jobs:
             tar -czvf Ubuntu-Extract.tar.gz -C dist "Hydrus Network"
       - 
         name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.2.4
         with:
           name: Ubuntu-Extract
           path: Ubuntu-Extract.tar.gz
@@ -205,7 +205,7 @@ jobs:
           cd ..
       - 
         name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.2.4
         with:
           name: Windows-Install
           path: dist\HydrusInstaller.exe
@@ -213,7 +213,7 @@ jobs:
           retention-days: 2
       - 
         name: Upload a Build Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.2.4
         with:
           name: Windows-Extract
           path: Windows-Extract.zip
